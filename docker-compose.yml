@@ -1,0 +1,73 @@
+version: "3.9"
+
+services:
+  coordinator:
+    build: ./coordinator
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker-1:
+    build: ./worker
+    environment:
+      - WORKER_ID=worker-1
+      - WORKER_PORT=8001
+      - WORKER_HOST=worker-1
+      - COORDINATOR_URL=http://coordinator:8000
+    ports:
+      - "8001:8001"
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
+
+  worker-2:
+    build: ./worker
+    environment:
+      - WORKER_ID=worker-2
+      - WORKER_PORT=8001
+      - WORKER_HOST=worker-2
+      - COORDINATOR_URL=http://coordinator:8000
+    ports:
+      - "8002:8001"
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
+
+  worker-3:
+    build: ./worker
+    environment:
+      - WORKER_ID=worker-3
+      - WORKER_PORT=8001
+      - WORKER_HOST=worker-3
+      - COORDINATOR_URL=http://coordinator:8000
+    ports:
+      - "8003:8001"
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8001
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "5173:5173"
+    depends_on:
+      - coordinator
+    environment:
+      - VITE_API_URL=http://coordinator:8000
+
+  cli:
+    build: ./cli
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      - COORDINATOR_URL=http://coordinator:8000
+    profiles:
+      - cli
