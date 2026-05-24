@@ -424,6 +424,7 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
     generated_ids: list[int] = list(encoded)
     prompt_token_count = len(generated_ids)
     eos_id = tokenizer.eos_token_id
+    last_decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
 
     stats = _init_stats(assignments)
     reshard_events: list[dict] = []
@@ -469,7 +470,9 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
             break
         generated_ids.append(next_token)
 
-        token_text = tokenizer.decode([next_token])
+        new_decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        token_text = new_decoded[len(last_decoded):]
+        last_decoded = new_decoded
         yield _sse("token", {
             "index": token_idx,
             "token_id": next_token,
