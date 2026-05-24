@@ -328,41 +328,73 @@ function FlowArrow({ active }: { active: boolean }) {
   return (
     <div className="flex items-center px-1">
       <svg
-        width="36"
-        height="14"
-        viewBox="0 0 36 14"
+        width="60"
+        height="20"
+        viewBox="0 0 60 20"
         className="overflow-visible"
       >
-        <defs>
-          <linearGradient id="flow-grad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#27272a" />
-            <stop offset="50%" stopColor="#a1a1aa" />
-            <stop offset="100%" stopColor="#27272a" />
-          </linearGradient>
-        </defs>
         <line
           x1="0"
-          y1="7"
-          x2="30"
-          y2="7"
-          stroke={active ? "url(#flow-grad)" : "#27272a"}
+          y1="10"
+          x2="52"
+          y2="10"
+          stroke={active ? "#52525b" : "#27272a"}
           strokeWidth="1.5"
-          strokeDasharray={active ? "4 4" : "0"}
-        >
-          {active && (
-            <animate
-              attributeName="stroke-dashoffset"
-              from="0"
-              to="-16"
-              dur="0.6s"
-              repeatCount="indefinite"
-            />
-          )}
-        </line>
+        />
         <polygon
-          points="30,3 36,7 30,11"
+          points="52,5 60,10 52,15"
           fill={active ? "#a1a1aa" : "#3f3f46"}
         />
+        {active && (
+          <>
+            <circle r="3" fill="#60a5fa">
+              <animateMotion
+                dur="1.2s"
+                repeatCount="indefinite"
+                path="M 0 10 L 52 10"
+              />
+              <animate
+                attributeName="opacity"
+                values="0;1;1;0"
+                keyTimes="0;0.1;0.9;1"
+                dur="1.2s"
+                repeatCount="indefinite"
+              />
+            </circle>
+            <circle r="3" fill="#a78bfa">
+              <animateMotion
+                dur="1.2s"
+                begin="0.4s"
+                repeatCount="indefinite"
+                path="M 0 10 L 52 10"
+              />
+              <animate
+                attributeName="opacity"
+                values="0;1;1;0"
+                keyTimes="0;0.1;0.9;1"
+                dur="1.2s"
+                begin="0.4s"
+                repeatCount="indefinite"
+              />
+            </circle>
+            <circle r="3" fill="#34d399">
+              <animateMotion
+                dur="1.2s"
+                begin="0.8s"
+                repeatCount="indefinite"
+                path="M 0 10 L 52 10"
+              />
+              <animate
+                attributeName="opacity"
+                values="0;1;1;0"
+                keyTimes="0;0.1;0.9;1"
+                dur="1.2s"
+                begin="0.8s"
+                repeatCount="indefinite"
+              />
+            </circle>
+          </>
+        )}
       </svg>
     </div>
   );
