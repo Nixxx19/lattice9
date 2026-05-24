@@ -41,8 +41,10 @@ def cli(ctx, coordinator: str):
 @cli.command()
 @click.option("--prompt", "-p", required=True, help="Input prompt for inference")
 @click.option("--max-tokens", "-m", default=50, help="Maximum tokens to generate")
+@click.option("--deterministic", "-d", is_flag=True, help="Greedy decode (reproducible)")
+@click.option("--temperature", "-t", default=0.8, help="Sampling temperature")
 @click.pass_context
-def infer(ctx, prompt: str, max_tokens: int):
+def infer(ctx, prompt: str, max_tokens: int, deterministic: bool, temperature: float):
     """Run distributed inference on a prompt."""
     url = f"{get_coordinator_url(ctx)}/api/infer"
 
@@ -57,7 +59,15 @@ def infer(ctx, prompt: str, max_tokens: int):
 
         try:
             with httpx.Client(timeout=120.0) as client:
-                resp = client.post(url, json={"prompt": prompt, "max_tokens": max_tokens})
+                resp = client.post(
+                    url,
+                    json={
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                        "deterministic": deterministic,
+                        "temperature": temperature,
+                    },
+                )
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.ConnectError:
