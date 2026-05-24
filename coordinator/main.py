@@ -52,6 +52,19 @@ class HeartbeatRequest(BaseModel):
 
 
 DEFAULT_MODEL = os.environ.get("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+STOP_STRINGS = ("<|user|>", "</|user|>", "<|assistant|>", "<|system|>", "<|im_end|>", "<|endoftext|>")
+
+
+def _stop_truncate(generated_text: str) -> tuple[str, bool]:
+    """Return (truncated_text, hit_stop). Truncates at earliest stop marker."""
+    earliest = len(generated_text)
+    hit = False
+    for s in STOP_STRINGS:
+        idx = generated_text.find(s)
+        if idx >= 0 and idx < earliest:
+            earliest = idx
+            hit = True
+    return generated_text[:earliest], hit
 scheduler = Scheduler(strategy=Strategy.UNIFORM, total_layers=0)
 active_model: str = DEFAULT_MODEL
 job_history: list[dict] = []
@@ -359,7 +372,14 @@ async def infer(req: InferRequest):
             break
         generated_ids.append(next_token)
 
+        running = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        _, hit_stop = _stop_truncate(running[len(req.prompt):])
+        if hit_stop:
+            break
+
     generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    truncated_gen, _ = _stop_truncate(generated_text[len(req.prompt):])
+    generated_text = req.prompt + truncated_gen
     tokens_generated = len(generated_ids) - prompt_token_count
     total_ms = (time.time() - start) * 1000
 
@@ -471,14 +491,20 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
         generated_ids.append(next_token)
 
         new_decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        generated_so_far = new_decoded[len(req.prompt):]
+        truncated_generated, hit_stop = _stop_truncate(generated_so_far)
+        new_decoded = req.prompt + truncated_generated
         token_text = new_decoded[len(last_decoded):]
         last_decoded = new_decoded
-        yield _sse("token", {
-            "index": token_idx,
-            "token_id": next_token,
-            "token_text": token_text,
-            "decode_worker": assignments[-1]["worker_id"],
-        })
+        if token_text:
+            yield _sse("token", {
+                "index": token_idx,
+                "token_id": next_token,
+                "token_text": token_text,
+                "decode_worker": assignments[-1]["worker_id"],
+            })
+        if hit_stop:
+            break
 
     full_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     total_ms = (time.time() - start) * 1000
