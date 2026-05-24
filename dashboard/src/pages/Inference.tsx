@@ -203,7 +203,11 @@ export default function Inference() {
             {loading && <span className="text-zinc-600 animate-pulse">▌</span>}
           </p>
           {streamWorkers.length > 0 && (
-            <PipelineActivity workers={streamWorkers} tokens={streamedTokens} />
+            <PipelineActivity
+              workers={streamWorkers}
+              tokens={streamedTokens}
+              active={loading}
+            />
           )}
           <p className="mt-4 text-xs text-zinc-500 leading-relaxed">
             every token passes through <strong>all</strong> workers in sequence.
@@ -262,37 +266,91 @@ const WORKER_BAR_COLORS = [
 function PipelineActivity({
   workers,
   tokens,
+  active,
 }: {
   workers: string[];
   tokens: { decode_worker: string }[];
+  active: boolean;
 }) {
-  const totalTokens = Math.max(tokens.length, 1);
+  const calls = tokens.length;
   return (
-    <div className="mt-5 space-y-2.5">
-      {workers.map((w, i) => {
-        const role =
-          i === 0 ? "input" : i === workers.length - 1 ? "output" : "middle";
-        const calls = tokens.length;
-        const pct = totalTokens > 0 ? (calls / totalTokens) * 100 : 0;
-        const barColor = WORKER_BAR_COLORS[i % WORKER_BAR_COLORS.length];
-        return (
-          <div key={w} className="text-sm">
-            <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
-              <span>
-                <span className="text-zinc-200">{w}</span>
-                <span className="text-zinc-600 ml-2">{role}</span>
-              </span>
-              <span className="text-zinc-500 font-mono">{calls} calls</span>
-            </div>
-            <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+    <div className="mt-6">
+      <div className="flex items-center justify-between gap-2">
+        {workers.map((w, i) => {
+          const role =
+            i === 0 ? "input" : i === workers.length - 1 ? "output" : "middle";
+          const barColor = WORKER_BAR_COLORS[i % WORKER_BAR_COLORS.length];
+          return (
+            <div key={w} className="contents">
               <div
-                className={`h-full ${barColor} transition-all duration-150`}
-                style={{ width: `${pct}%` }}
-              />
+                className={`flex-1 border border-zinc-900 rounded-md p-3 ${
+                  active ? "bg-zinc-900/40" : "bg-zinc-950/40"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-block w-2 h-2 rounded-full ${barColor} ${
+                        active ? "animate-pulse" : "opacity-60"
+                      }`}
+                    />
+                    <span className="text-sm text-zinc-100">{w}</span>
+                  </div>
+                  <span className="text-[11px] uppercase tracking-wider text-zinc-500">
+                    {role}
+                  </span>
+                </div>
+                <div className="text-xs text-zinc-500 font-mono">{calls} calls</div>
+              </div>
+              {i < workers.length - 1 && <FlowArrow active={active} />}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FlowArrow({ active }: { active: boolean }) {
+  return (
+    <div className="flex items-center px-1">
+      <svg
+        width="36"
+        height="14"
+        viewBox="0 0 36 14"
+        className="overflow-visible"
+      >
+        <defs>
+          <linearGradient id="flow-grad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#27272a" />
+            <stop offset="50%" stopColor="#a1a1aa" />
+            <stop offset="100%" stopColor="#27272a" />
+          </linearGradient>
+        </defs>
+        <line
+          x1="0"
+          y1="7"
+          x2="30"
+          y2="7"
+          stroke={active ? "url(#flow-grad)" : "#27272a"}
+          strokeWidth="1.5"
+          strokeDasharray={active ? "4 4" : "0"}
+        >
+          {active && (
+            <animate
+              attributeName="stroke-dashoffset"
+              from="0"
+              to="-16"
+              dur="0.6s"
+              repeatCount="indefinite"
+            />
+          )}
+        </line>
+        <polygon
+          points="30,3 36,7 30,11"
+          fill={active ? "#a1a1aa" : "#3f3f46"}
+        />
+      </svg>
     </div>
   );
 }
