@@ -55,6 +55,19 @@ DEFAULT_MODEL = os.environ.get("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0
 STOP_STRINGS = ("<|user|>", "</|user|>", "<|assistant|>", "<|system|>", "<|im_end|>", "<|endoftext|>", "\n\n\n")
 
 
+def _encode_prompt(prompt: str) -> tuple[list[int], str]:
+    if getattr(tokenizer, "chat_template", None):
+        ids = tokenizer.apply_chat_template(
+            [{"role": "user", "content": prompt}],
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )[0].tolist()
+    else:
+        ids = tokenizer(prompt, return_tensors="pt")["input_ids"][0].tolist()
+    decoded = tokenizer.decode(ids, skip_special_tokens=True)
+    return ids, decoded
+
+
 def _stop_truncate(generated_text: str) -> tuple[str, bool]:
     """Return (truncated_text, hit_stop). Truncates at earliest stop marker."""
     earliest = len(generated_text)
@@ -320,7 +333,7 @@ async def infer(req: InferRequest):
     if not assignments:
         raise HTTPException(status_code=503, detail="No workers available")
 
-    encoded = tokenizer(req.prompt, return_tensors="pt")["input_ids"][0].tolist()
+    encoded, prompt_decoded = _encode_prompt(req.prompt)
     generated_ids: list[int] = list(encoded)
     prompt_token_count = len(generated_ids)
     eos_id = tokenizer.eos_token_id
@@ -373,12 +386,12 @@ async def infer(req: InferRequest):
         generated_ids.append(next_token)
 
         running = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        _, hit_stop = _stop_truncate(running[len(req.prompt):])
+        _, hit_stop = _stop_truncate(running[len(prompt_decoded):])
         if hit_stop:
             break
 
     generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    truncated_gen, _ = _stop_truncate(generated_text[len(req.prompt):])
+    truncated_gen, _ = _stop_truncate(generated_text[len(prompt_decoded):])
     generated_text = req.prompt + truncated_gen
     tokens_generated = len(generated_ids) - prompt_token_count
     total_ms = (time.time() - start) * 1000
@@ -440,11 +453,11 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
         ],
     })
 
-    encoded = tokenizer(req.prompt, return_tensors="pt")["input_ids"][0].tolist()
+    encoded, prompt_decoded = _encode_prompt(req.prompt)
     generated_ids: list[int] = list(encoded)
     prompt_token_count = len(generated_ids)
     eos_id = tokenizer.eos_token_id
-    last_decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    last_decoded = prompt_decoded
 
     stats = _init_stats(assignments)
     reshard_events: list[dict] = []
@@ -491,9 +504,9 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
         generated_ids.append(next_token)
 
         new_decoded = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        generated_so_far = new_decoded[len(req.prompt):]
+        generated_so_far = new_decoded[len(prompt_decoded):]
         truncated_generated, hit_stop = _stop_truncate(generated_so_far)
-        new_decoded = req.prompt + truncated_generated
+        new_decoded = prompt_decoded + truncated_generated
         token_text = new_decoded[len(last_decoded):]
         last_decoded = new_decoded
         if token_text:
