@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 import httpx
 import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from transformers import GPT2Tokenizer
 
@@ -319,6 +322,101 @@ async def infer(req: InferRequest):
         total_latency_ms=round(total_ms, 2),
         worker_trace=worker_trace,
     )
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
+    request_id = str(uuid.uuid4())[:8]
+    start = time.time()
+
+    assignments = scheduler.get_worker_assignments()
+    if not assignments:
+        yield _sse("error", {"detail": "No workers available"})
+        return
+
+    yield _sse("start", {
+        "request_id": request_id,
+        "prompt": req.prompt,
+        "assignments": [
+            {"worker_id": a["worker_id"], "layers": a["layers"]} for a in assignments
+        ],
+    })
+
+    encoded = tokenizer(req.prompt, return_tensors="pt")["input_ids"][0].tolist()
+    generated_ids: list[int] = list(encoded)
+    prompt_token_count = len(generated_ids)
+    eos_id = tokenizer.eos_token_id
+
+    stats = _init_stats(assignments)
+    reshard_events: list[dict] = []
+
+    for token_idx in range(req.max_tokens):
+        attempt = 0
+        while True:
+            try:
+                logits_row = await _pipeline_pass(
+                    assignments, [generated_ids], stats, request_id
+                )
+                break
+            except WorkerCallError as e:
+                attempt += 1
+                scheduler.remove_worker(e.worker_id)
+                assignments = scheduler.get_worker_assignments()
+                if not assignments:
+                    yield _sse("error", {"detail": "all workers failed"})
+                    return
+                for a in assignments:
+                    stats.setdefault(a["worker_id"], {
+                        "url": a["url"],
+                        "layers": a["layers"],
+                        "calls": 0,
+                        "total_ms": 0.0,
+                    })
+                    stats[a["worker_id"]]["layers"] = a["layers"]
+                reshard_events.append({
+                    "token_index": token_idx,
+                    "dropped_worker": e.worker_id,
+                })
+                yield _sse("reshard", {
+                    "token_index": token_idx,
+                    "dropped_worker": e.worker_id,
+                    "remaining": [a["worker_id"] for a in assignments],
+                })
+                if attempt > 5:
+                    yield _sse("error", {"detail": "too many reshards"})
+                    return
+
+        next_token = _sample_token(logits_row, req)
+        if next_token == eos_id:
+            break
+        generated_ids.append(next_token)
+
+        token_text = tokenizer.decode([next_token])
+        yield _sse("token", {
+            "index": token_idx,
+            "token_id": next_token,
+            "token_text": token_text,
+            "decode_worker": assignments[-1]["worker_id"],
+        })
+
+    full_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    total_ms = (time.time() - start) * 1000
+
+    yield _sse("done", {
+        "request_id": request_id,
+        "result": full_text,
+        "tokens_generated": len(generated_ids) - prompt_token_count,
+        "total_latency_ms": round(total_ms, 2),
+        "reshard_events": reshard_events,
+    })
+
+
+@app.post("/api/infer/stream")
+async def infer_stream(req: InferRequest):
+    return StreamingResponse(_stream_inference(req), media_type="text/event-stream")
 
 
 if __name__ == "__main__":

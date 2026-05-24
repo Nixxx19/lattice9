@@ -17,39 +17,116 @@ interface InferResult {
   worker_trace: WorkerTrace[];
 }
 
+interface StreamToken {
+  index: number;
+  token_text: string;
+  decode_worker: string;
+}
+
+const WORKER_COLORS = [
+  "text-blue-400",
+  "text-purple-400",
+  "text-green-400",
+  "text-yellow-400",
+  "text-pink-400",
+  "text-cyan-400",
+];
+
+function workerColor(workerId: string, knownWorkers: string[]): string {
+  const idx = knownWorkers.indexOf(workerId);
+  return WORKER_COLORS[(idx >= 0 ? idx : 0) % WORKER_COLORS.length];
+}
+
 export default function Inference() {
   const [prompt, setPrompt] = useState("");
   const [maxTokens, setMaxTokens] = useState(50);
+  const [stream, setStream] = useState(true);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<InferResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activePhase, setActivePhase] = useState<string | null>(null);
+  const [streamedTokens, setStreamedTokens] = useState<StreamToken[]>([]);
+  const [streamWorkers, setStreamWorkers] = useState<string[]>([]);
+  const [reshards, setReshards] = useState<any[]>([]);
+
+  const runInferenceStreamed = async () => {
+    setStreamedTokens([]);
+    setStreamWorkers([]);
+    setReshards([]);
+
+    const res = await fetch("/api/infer/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, max_tokens: maxTokens }),
+    });
+    if (!res.ok || !res.body) throw new Error("stream open failed");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const block of events) {
+        if (!block.trim()) continue;
+        const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
+        const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
+        if (!eventLine || !dataLine) continue;
+        const type = eventLine.replace("event:", "").trim();
+        const data = JSON.parse(dataLine.replace("data:", "").trim());
+
+        if (type === "start") {
+          setStreamWorkers(data.assignments.map((a: any) => a.worker_id));
+        } else if (type === "token") {
+          setStreamedTokens((prev) => [...prev, data]);
+        } else if (type === "reshard") {
+          setReshards((prev) => [...prev, data]);
+        } else if (type === "done") {
+          setResult({
+            request_id: data.request_id,
+            prompt,
+            result: data.result,
+            tokens_generated: data.tokens_generated,
+            total_latency_ms: data.total_latency_ms,
+            worker_trace: [],
+          });
+        } else if (type === "error") {
+          throw new Error(data.detail);
+        }
+      }
+    }
+  };
+
+  const runInferenceBlocking = async () => {
+    const res = await fetch("/api/infer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, max_tokens: maxTokens }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.detail || "Inference failed");
+    }
+    const data: InferResult = await res.json();
+    setResult(data);
+  };
 
   const runInference = async () => {
     if (!prompt.trim()) return;
     setLoading(true);
     setResult(null);
     setError(null);
-    setActivePhase("distributing");
+    setStreamedTokens([]);
+    setReshards([]);
 
     try {
-      const res = await fetch("/api/infer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, max_tokens: maxTokens }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Inference failed");
-      }
-
-      const data: InferResult = await res.json();
-      setResult(data);
-      setActivePhase(null);
+      if (stream) await runInferenceStreamed();
+      else await runInferenceBlocking();
     } catch (e: any) {
       setError(e.message);
-      setActivePhase(null);
     } finally {
       setLoading(false);
     }
@@ -87,6 +164,15 @@ export default function Inference() {
                 className="w-32 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
               />
             </div>
+            <label className="flex items-center gap-2 text-sm text-gray-300 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                checked={stream}
+                onChange={(e) => setStream(e.target.checked)}
+                className="accent-indigo-500"
+              />
+              Stream tokens
+            </label>
             <button
               onClick={runInference}
               disabled={loading || !prompt.trim()}
@@ -104,18 +190,63 @@ export default function Inference() {
         </div>
       )}
 
-      {/* Progress visualization */}
-      {loading && (
+      {loading && stream && streamedTokens.length === 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
-            Processing
-          </h3>
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 rounded-full bg-indigo-500 animate-ping" />
-            <span className="text-indigo-400">
-              Distributing inference across worker nodes...
-            </span>
+            <span className="text-indigo-400">opening pipeline...</span>
           </div>
+        </div>
+      )}
+
+      {loading && !stream && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 rounded-full bg-indigo-500 animate-ping" />
+            <span className="text-indigo-400">running inference...</span>
+          </div>
+        </div>
+      )}
+
+      {streamedTokens.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            Live tokens
+          </h3>
+          <p className="leading-relaxed font-mono text-sm">
+            <span className="text-gray-500">{prompt}</span>
+            {streamedTokens.map((t) => (
+              <span
+                key={t.index}
+                className={workerColor(t.decode_worker, streamWorkers)}
+                title={`from ${t.decode_worker}`}
+              >
+                {t.token_text}
+              </span>
+            ))}
+            {loading && <span className="text-gray-500 animate-pulse">▌</span>}
+          </p>
+          {streamWorkers.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-3 text-xs">
+              {streamWorkers.map((w) => (
+                <span key={w} className={`${workerColor(w, streamWorkers)}`}>
+                  ● {w}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {reshards.length > 0 && (
+        <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 text-yellow-300 text-sm">
+          {reshards.map((r, i) => (
+            <div key={i}>
+              dropped <span className="font-mono">{r.dropped_worker}</span> at
+              token {r.token_index}; resharded across{" "}
+              {r.remaining?.join(", ") || "remaining workers"}
+            </div>
+          ))}
         </div>
       )}
 
