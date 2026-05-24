@@ -53,7 +53,8 @@ export default function Inference() {
     setStreamWorkers([]);
     setReshards([]);
 
-    const res = await fetch("/api/infer/stream", {
+    const coordinatorBase = `${window.location.protocol}//${window.location.hostname}:8000`;
+    const res = await fetch(`${coordinatorBase}/api/infer/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt, max_tokens: maxTokens }),
