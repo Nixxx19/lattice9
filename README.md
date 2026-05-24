@@ -4,6 +4,15 @@ deterministic token-to-token relay inference across worker nodes. split a transf
 
 defaults to `TinyLlama-1.1B-Chat` (1.1b params, 22 layers, instruction-tuned, ungated); swap to any huggingface model with `MODEL_NAME=...`.
 
+## demo
+
+<!-- drag-and-drop your demo .mp4 onto the line below in the github web editor.
+     github will replace the placeholder with a hosted video embed automatically. -->
+
+https://github.com/Nixxx19/lattice9/assets/REPLACE_ME
+
+## quickstart
+
 ```bash
 docker compose up --build
 python cli/main.py infer -p "the quick brown fox" -d
