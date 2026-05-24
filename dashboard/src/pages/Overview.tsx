@@ -49,11 +49,11 @@ export default function Overview() {
       }
       if (jRes.ok) {
         const jData = await jRes.json();
-        setJobs(jData.jobs.reverse());
+        setJobs(jData.jobs.slice().reverse());
       }
       setError(null);
     } catch {
-      setError("Cannot connect to coordinator");
+      setError("cannot connect to coordinator");
     }
   };
 
@@ -66,30 +66,26 @@ export default function Overview() {
   return (
     <div className="space-y-8">
       {error && (
-        <div className="bg-red-900/30 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+        <div className="border border-rose-900/60 bg-rose-950/30 text-rose-300 px-4 py-2 rounded-md text-sm">
           {error}
         </div>
       )}
 
-      {/* Stats cards */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <StatCard label="Active Workers" value={`${stats.workers_active}/${stats.workers_total}`} color="indigo" />
-          <StatCard label="Total Jobs" value={stats.total_jobs.toString()} color="green" />
-          <StatCard label="Avg Latency" value={`${stats.avg_latency_ms.toFixed(0)}ms`} color="yellow" />
-          <StatCard label="Strategy" value={stats.strategy.replace("_", " ")} color="purple" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard label="active workers" value={`${stats.workers_active}/${stats.workers_total}`} />
+          <StatCard label="total jobs" value={stats.total_jobs.toLocaleString()} />
+          <StatCard label="avg latency" value={`${stats.avg_latency_ms.toFixed(0)} ms`} />
+          <StatCard label="strategy" value={stats.strategy} mono />
         </div>
       )}
 
-      {/* Worker cards */}
       <section>
-        <h2 className="text-lg font-semibold text-white mb-4">Workers</h2>
+        <SectionHeader title="workers" />
         {workers.length === 0 ? (
-          <div className="text-gray-500 bg-gray-900 rounded-lg p-8 text-center">
-            No workers registered. Start a worker to begin.
-          </div>
+          <EmptyState text="no workers registered" />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {workers.map((w) => (
               <WorkerCard key={w.worker_id} worker={w} />
             ))}
@@ -97,45 +93,14 @@ export default function Overview() {
         )}
       </section>
 
-      {/* Recent jobs */}
       <section>
-        <h2 className="text-lg font-semibold text-white mb-4">Recent Jobs</h2>
+        <SectionHeader title="recent jobs" />
         {jobs.length === 0 ? (
-          <div className="text-gray-500 bg-gray-900 rounded-lg p-8 text-center">
-            No inference jobs yet. Submit a prompt to get started.
-          </div>
+          <EmptyState text="no inference jobs yet" />
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {jobs.slice(0, 10).map((job) => (
-              <div
-                key={job.request_id}
-                className="bg-gray-900 border border-gray-800 rounded-lg p-4"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-xs text-gray-500 font-mono">
-                    {job.request_id}
-                  </span>
-                  <span className="text-xs text-green-400">
-                    {job.total_latency_ms.toFixed(0)}ms
-                  </span>
-                </div>
-                <p className="text-sm text-gray-300 mb-1">
-                  <span className="text-gray-500">Prompt:</span> {job.prompt}
-                </p>
-                <p className="text-sm text-white mb-2 line-clamp-2">
-                  {job.result}
-                </p>
-                <div className="flex gap-2 flex-wrap">
-                  {job.worker_trace.map((t, i) => (
-                    <span
-                      key={i}
-                      className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded"
-                    >
-                      {t.worker_id} ({t.phase}, {t.latency_ms.toFixed(0)}ms)
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <JobRow key={job.request_id + job.timestamp} job={job} />
             ))}
           </div>
         )}
@@ -147,83 +112,117 @@ export default function Overview() {
 function StatCard({
   label,
   value,
-  color,
+  mono,
 }: {
   label: string;
   value: string;
-  color: string;
+  mono?: boolean;
 }) {
-  const colorMap: Record<string, string> = {
-    indigo: "border-indigo-600 text-indigo-400",
-    green: "border-green-600 text-green-400",
-    yellow: "border-yellow-600 text-yellow-400",
-    purple: "border-purple-600 text-purple-400",
-  };
-  const c = colorMap[color] || colorMap.indigo;
-
   return (
-    <div className={`bg-gray-900 border-l-4 ${c.split(" ")[0]} rounded-lg p-4`}>
-      <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+    <div className="border border-zinc-900 rounded-lg p-4 bg-zinc-950/40">
+      <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
         {label}
       </div>
-      <div className={`text-2xl font-bold ${c.split(" ")[1]}`}>{value}</div>
+      <div className={`text-lg font-semibold text-zinc-100 ${mono ? "font-mono" : ""}`}>
+        {value}
+      </div>
     </div>
   );
 }
 
 function WorkerCard({ worker }: { worker: Worker }) {
-  const isHealthy =
-    Date.now() / 1000 - worker.last_heartbeat < 30;
+  const isHealthy = Date.now() / 1000 - worker.last_heartbeat < 30;
   const layers = worker.assigned_layers;
   const layerRange =
     layers.length > 0
-      ? `${Math.min(...layers)}-${Math.max(...layers)}`
-      : "none";
+      ? `${Math.min(...layers)}–${Math.max(...layers)}`
+      : "—";
 
   return (
-    <div
-      className={`bg-gray-900 border rounded-lg p-5 ${
-        isHealthy
-          ? "border-green-800 worker-card-active"
-          : "border-red-800 opacity-60"
-      }`}
-    >
+    <div className="border border-zinc-900 rounded-lg p-4 bg-zinc-950/40">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-white">{worker.worker_id}</h3>
-        <span
-          className={`text-xs px-2 py-0.5 rounded-full ${
-            isHealthy
-              ? "bg-green-900 text-green-300"
-              : "bg-red-900 text-red-300"
-          }`}
-        >
+        <div className="flex items-center gap-2">
+          <span
+            className={`inline-block w-1.5 h-1.5 rounded-full ${
+              isHealthy ? "bg-emerald-400" : "bg-rose-400"
+            }`}
+          />
+          <h3 className="font-medium text-zinc-100 text-sm">{worker.worker_id}</h3>
+        </div>
+        <span className="text-[11px] text-zinc-500">
           {isHealthy ? "healthy" : "offline"}
         </span>
       </div>
-      <div className="text-xs text-gray-500 mb-3 font-mono">{worker.url}</div>
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <span className="text-gray-500">CPU:</span>{" "}
-          <span className="text-white">{worker.cpu_cores} cores</span>
-        </div>
-        <div>
-          <span className="text-gray-500">Memory:</span>{" "}
-          <span className="text-white">{(worker.memory_mb / 1024).toFixed(1)}GB</span>
-        </div>
-        <div>
-          <span className="text-gray-500">Layers:</span>{" "}
-          <span className="text-yellow-400">{layerRange}</span>
-        </div>
-        <div>
-          <span className="text-gray-500">Jobs:</span>{" "}
-          <span className="text-green-400">{worker.jobs_processed}</span>
-        </div>
+      <div className="text-[11px] font-mono text-zinc-600 mb-3 truncate">
+        {worker.url}
       </div>
-      {worker.avg_latency_ms > 0 && (
-        <div className="mt-3 text-xs text-gray-500">
-          Avg latency: {worker.avg_latency_ms.toFixed(1)}ms
+      <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
+        <dt className="text-zinc-500">cpu</dt>
+        <dd className="text-zinc-300 text-right">{worker.cpu_cores} cores</dd>
+        <dt className="text-zinc-500">memory</dt>
+        <dd className="text-zinc-300 text-right">
+          {(worker.memory_mb / 1024).toFixed(1)} GB
+        </dd>
+        <dt className="text-zinc-500">layers</dt>
+        <dd className="text-zinc-300 text-right font-mono">{layerRange}</dd>
+        <dt className="text-zinc-500">jobs</dt>
+        <dd className="text-zinc-300 text-right">{worker.jobs_processed}</dd>
+        {worker.avg_latency_ms > 0 && (
+          <>
+            <dt className="text-zinc-500">avg latency</dt>
+            <dd className="text-zinc-300 text-right">
+              {worker.avg_latency_ms.toFixed(0)} ms
+            </dd>
+          </>
+        )}
+      </dl>
+    </div>
+  );
+}
+
+function JobRow({ job }: { job: Job }) {
+  return (
+    <div className="border border-zinc-900 rounded-lg p-3 bg-zinc-950/40">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[11px] font-mono text-zinc-500">
+          {job.request_id}
+        </span>
+        <span className="text-[11px] text-zinc-500">
+          {job.tokens_generated} tokens · {job.total_latency_ms.toFixed(0)} ms
+        </span>
+      </div>
+      <p className="text-xs text-zinc-400 mb-1">
+        <span className="text-zinc-600">prompt:</span> {job.prompt}
+      </p>
+      <p className="text-xs text-zinc-200 line-clamp-2">{job.result}</p>
+      {job.worker_trace.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {job.worker_trace.map((t, i) => (
+            <span
+              key={i}
+              className="text-[10px] font-mono text-zinc-500 border border-zinc-900 px-1.5 py-0.5 rounded"
+            >
+              {t.worker_id} · {t.latency_ms.toFixed(0)}ms
+            </span>
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function SectionHeader({ title }: { title: string }) {
+  return (
+    <h2 className="text-[11px] uppercase tracking-wider text-zinc-500 mb-3">
+      {title}
+    </h2>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="border border-zinc-900 rounded-lg p-8 text-center text-sm text-zinc-600">
+      {text}
     </div>
   );
 }

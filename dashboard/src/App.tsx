@@ -1,48 +1,54 @@
+import { useState } from "react";
 import { Routes, Route, NavLink } from "react-router-dom";
 import Overview from "./pages/Overview";
 import Inference from "./pages/Inference";
+import { InferenceCtx, InferenceSession, emptySession } from "./state";
 
 function App() {
+  const [session, setSession] = useState<InferenceSession>(emptySession);
+  const update = (patch: Partial<InferenceSession>) =>
+    setSession((prev) => ({ ...prev, ...patch }));
+
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+    `px-3 py-1.5 rounded-md text-sm transition-colors ${
       isActive
-        ? "bg-indigo-600 text-white"
-        : "text-gray-400 hover:text-white hover:bg-gray-800"
+        ? "bg-zinc-800 text-zinc-100"
+        : "text-zinc-400 hover:text-zinc-200"
     }`;
 
   return (
-    <div className="min-h-screen bg-gray-950">
-      {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">
-              H
+    <InferenceCtx.Provider value={{ session, update }}>
+      <div className="min-h-screen bg-zinc-950 text-zinc-100">
+        <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded bg-zinc-100 text-zinc-950 flex items-center justify-center font-semibold text-sm">
+                h
+              </div>
+              <h1 className="text-base font-semibold tracking-tight">hivemind</h1>
+              <span className="text-[11px] text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded">
+                distributed inference
+              </span>
             </div>
-            <h1 className="text-xl font-bold text-white">Hivemind</h1>
-            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">
-              Distributed Inference
-            </span>
+            <nav className="flex gap-1">
+              <NavLink to="/" className={linkClass} end>
+                overview
+              </NavLink>
+              <NavLink to="/inference" className={linkClass}>
+                inference
+              </NavLink>
+            </nav>
           </div>
-          <nav className="flex gap-2">
-            <NavLink to="/" className={linkClass} end>
-              Overview
-            </NavLink>
-            <NavLink to="/inference" className={linkClass}>
-              Inference
-            </NavLink>
-          </nav>
-        </div>
-      </header>
+        </header>
 
-      {/* Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/inference" element={<Inference />} />
-        </Routes>
-      </main>
-    </div>
+        <main className="max-w-6xl mx-auto px-6 py-8">
+          <Routes>
+            <Route path="/" element={<Overview />} />
+            <Route path="/inference" element={<Inference />} />
+          </Routes>
+        </main>
+      </div>
+    </InferenceCtx.Provider>
   );
 }
 

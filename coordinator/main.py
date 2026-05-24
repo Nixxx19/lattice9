@@ -450,11 +450,38 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
 
     full_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     total_ms = (time.time() - start) * 1000
+    tokens_generated = len(generated_ids) - prompt_token_count
+
+    worker_trace = []
+    for idx, a in enumerate(assignments):
+        wid = a["worker_id"]
+        s = stats.get(wid, {"url": a["url"], "layers": a["layers"], "calls": 0, "total_ms": 0.0})
+        worker_trace.append({
+            "worker_id": wid,
+            "url": s["url"],
+            "phase": _phase_for(idx, len(assignments)),
+            "layers": s["layers"],
+            "calls": s["calls"],
+            "latency_ms": round(s["total_ms"], 2),
+            "avg_call_ms": round(s["total_ms"] / s["calls"], 2) if s["calls"] else 0.0,
+        })
+
+    job_history.append({
+        "request_id": request_id,
+        "prompt": req.prompt,
+        "result": full_text,
+        "tokens_generated": tokens_generated,
+        "total_latency_ms": round(total_ms, 2),
+        "worker_trace": worker_trace,
+        "reshard_events": reshard_events,
+        "streamed": True,
+        "timestamp": time.time(),
+    })
 
     yield _sse("done", {
         "request_id": request_id,
         "result": full_text,
-        "tokens_generated": len(generated_ids) - prompt_token_count,
+        "tokens_generated": tokens_generated,
         "total_latency_ms": round(total_ms, 2),
         "reshard_events": reshard_events,
     })
