@@ -2,7 +2,7 @@
 
 distributed llm inference. split a transformer across a pool of worker nodes, run each generated token through the full pipeline, get output that's bitwise identical to monolithic greedy decoding.
 
-defaults to `gpt2-large` (774m params, 36 layers); swap to any model with `MODEL_NAME=...`.
+defaults to `gpt2-large` (774m params, 36 layers); needs ~12gb of docker memory for three workers, or swap to a smaller variant with `MODEL_NAME=gpt2-medium`.
 
 ```bash
 docker compose up --build
