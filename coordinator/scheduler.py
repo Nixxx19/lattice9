@@ -12,7 +12,9 @@ from typing import Optional
 
 
 class Strategy(str, Enum):
-    ROUND_ROBIN = "round_robin"
+    # Equal contiguous chunks. With 12 layers and 3 workers: [0-3], [4-7], [8-11].
+    UNIFORM = "uniform"
+    # Contiguous chunks weighted by each worker's capacity_score.
     CAPACITY = "capacity"
 
 
@@ -53,11 +55,10 @@ class WorkerInfo:
 
 
 class Scheduler:
-    def __init__(self, strategy: Strategy = Strategy.ROUND_ROBIN, total_layers: int = 12):
+    def __init__(self, strategy: Strategy = Strategy.UNIFORM, total_layers: int = 12):
         self.strategy = strategy
         self.total_layers = total_layers
         self.workers: dict[str, WorkerInfo] = {}
-        self._rr_index = 0
 
     def register_worker(self, worker_id: str, url: str, cpu_cores: int, memory_mb: int) -> WorkerInfo:
         worker = WorkerInfo(
@@ -86,6 +87,9 @@ class Scheduler:
         ]
 
     def _reassign_layers(self) -> None:
+        # Pipeline parallelism requires each worker to own a contiguous block of
+        # layers — interleaved assignments would break the forward pass because
+        # block N+1 depends on block N's output.
         healthy = self.get_healthy_workers()
         if not healthy:
             return
@@ -93,23 +97,35 @@ class Scheduler:
         for w in healthy:
             w.assigned_layers = []
 
-        if self.strategy == Strategy.ROUND_ROBIN:
-            for i in range(self.total_layers):
-                worker = healthy[i % len(healthy)]
-                worker.assigned_layers.append(i)
+        n = len(healthy)
+        if self.strategy == Strategy.UNIFORM:
+            counts = self._uniform_counts(n)
         else:
-            total_cap = sum(w.capacity_score for w in healthy)
-            if total_cap == 0:
-                total_cap = 1
-            assigned = 0
-            for idx, worker in enumerate(healthy):
-                if idx == len(healthy) - 1:
-                    count = self.total_layers - assigned
-                else:
-                    count = max(1, int(self.total_layers * (worker.capacity_score / total_cap)))
-                    count = min(count, self.total_layers - assigned)
-                worker.assigned_layers = list(range(assigned, assigned + count))
+            counts = self._capacity_counts(healthy)
+
+        start = 0
+        for worker, count in zip(healthy, counts):
+            worker.assigned_layers = list(range(start, start + count))
+            start += count
+
+    def _uniform_counts(self, n_workers: int) -> list[int]:
+        base = self.total_layers // n_workers
+        remainder = self.total_layers % n_workers
+        return [base + (1 if i < remainder else 0) for i in range(n_workers)]
+
+    def _capacity_counts(self, healthy: list[WorkerInfo]) -> list[int]:
+        total_cap = sum(w.capacity_score for w in healthy) or 1.0
+        counts: list[int] = []
+        assigned = 0
+        for idx, worker in enumerate(healthy):
+            if idx == len(healthy) - 1:
+                counts.append(self.total_layers - assigned)
+            else:
+                count = max(1, int(self.total_layers * (worker.capacity_score / total_cap)))
+                count = min(count, self.total_layers - assigned - (len(healthy) - idx - 1))
+                counts.append(count)
                 assigned += count
+        return counts
 
     def get_worker_assignments(self) -> list[dict]:
         healthy = self.get_healthy_workers()

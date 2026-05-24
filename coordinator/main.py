@@ -51,7 +51,7 @@ class HeartbeatRequest(BaseModel):
 # App state
 # ---------------------------------------------------------------------------
 
-scheduler = Scheduler(strategy=Strategy.ROUND_ROBIN, total_layers=12)
+scheduler = Scheduler(strategy=Strategy.UNIFORM, total_layers=12)
 job_history: list[dict] = []
 http_client: httpx.AsyncClient | None = None
 
