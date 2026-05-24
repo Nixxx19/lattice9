@@ -93,13 +93,20 @@ async def register_with_coordinator() -> None:
 
 
 async def heartbeat_loop() -> None:
-    url = f"{COORDINATOR_URL}/api/workers/heartbeat"
+    hb_url = f"{COORDINATOR_URL}/api/workers/heartbeat"
     async with httpx.AsyncClient(timeout=5.0) as client:
         while True:
             try:
-                await client.post(url, json={"worker_id": WORKER_ID})
-            except Exception:
-                pass
+                resp = await client.post(hb_url, json={"worker_id": WORKER_ID})
+                if resp.status_code >= 400:
+                    print(f"[{WORKER_ID}] heartbeat rejected ({resp.status_code}), re-registering")
+                    await register_with_coordinator()
+            except Exception as e:
+                print(f"[{WORKER_ID}] heartbeat failed: {e}, re-registering")
+                try:
+                    await register_with_coordinator()
+                except Exception:
+                    pass
             await asyncio.sleep(10)
 
 

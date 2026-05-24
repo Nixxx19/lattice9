@@ -145,6 +145,8 @@ async def register_worker(req: RegisterRequest):
 
 @app.post("/api/workers/heartbeat")
 async def worker_heartbeat(req: HeartbeatRequest):
+    if req.worker_id not in scheduler.workers:
+        raise HTTPException(status_code=404, detail="unknown worker, re-register")
     scheduler.heartbeat(req.worker_id)
     return {"status": "ok"}
 
