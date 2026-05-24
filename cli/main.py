@@ -1,5 +1,5 @@
 """
-Plasma-Mesh CLI - interact with the distributed inference system.
+Lattice9 CLI - interact with the distributed inference system.
 
 Usage:
     python main.py infer --prompt "Once upon a time" --max-tokens 50
@@ -33,7 +33,7 @@ def get_coordinator_url(ctx: click.Context) -> str:
 @click.option("--coordinator", "-c", default=DEFAULT_COORDINATOR, help="Coordinator URL")
 @click.pass_context
 def cli(ctx, coordinator: str):
-    """Plasma-Mesh - Distributed AI Inference CLI"""
+    """Lattice9 - Distributed AI Inference CLI"""
     ctx.ensure_object(dict)
     ctx.obj["coordinator"] = coordinator
 
@@ -48,7 +48,7 @@ def infer(ctx, prompt: str, max_tokens: int, deterministic: bool, temperature: f
     """Run distributed inference on a prompt."""
     url = f"{get_coordinator_url(ctx)}/api/infer"
 
-    console.print(Panel(f"[bold cyan]Prompt:[/] {prompt}", title="Plasma-Mesh Inference"))
+    console.print(Panel(f"[bold cyan]Prompt:[/] {prompt}", title="Lattice9 Inference"))
 
     with Progress(
         SpinnerColumn(),
@@ -125,7 +125,7 @@ def workers(ctx):
         console.print("[yellow]No workers registered.[/]")
         return
 
-    table = Table(title=f"Plasma-Mesh Workers ({stats['workers_active']}/{stats['workers_total']} active)")
+    table = Table(title=f"Lattice9 Workers ({stats['workers_active']}/{stats['workers_total']} active)")
     table.add_column("ID", style="cyan")
     table.add_column("URL", style="dim")
     table.add_column("CPU", justify="right")
@@ -179,7 +179,7 @@ def benchmark(ctx, prompts: int, max_tokens: int):
 
     console.print(Panel(
         f"[bold]Running benchmark: {prompts} prompts, {max_tokens} max tokens each[/]",
-        title="Plasma-Mesh Benchmark",
+        title="Lattice9 Benchmark",
     ))
 
     results = []

@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     await http_client.aclose()
 
 
-app = FastAPI(title="Plasma-Mesh Coordinator", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Lattice9 Coordinator", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -89,25 +89,25 @@ async def metrics():
     lines: list[str] = []
     stats = scheduler.get_throughput_stats()
 
-    lines.append("# TYPE plasma_mesh_workers_total gauge")
-    lines.append(f"plasma_mesh_workers_total {stats['workers_total']}")
-    lines.append("# TYPE plasma_mesh_workers_active gauge")
-    lines.append(f"plasma_mesh_workers_active {stats['workers_active']}")
-    lines.append("# TYPE plasma_mesh_jobs_completed_total counter")
-    lines.append(f"plasma_mesh_jobs_completed_total {len(job_history)}")
-    lines.append("# TYPE plasma_mesh_pipeline_calls_total counter")
-    lines.append(f"plasma_mesh_pipeline_calls_total {stats['total_jobs']}")
-    lines.append("# TYPE plasma_mesh_avg_call_latency_ms gauge")
-    lines.append(f"plasma_mesh_avg_call_latency_ms {stats['avg_latency_ms']}")
+    lines.append("# TYPE lattice9_workers_total gauge")
+    lines.append(f"lattice9_workers_total {stats['workers_total']}")
+    lines.append("# TYPE lattice9_workers_active gauge")
+    lines.append(f"lattice9_workers_active {stats['workers_active']}")
+    lines.append("# TYPE lattice9_jobs_completed_total counter")
+    lines.append(f"lattice9_jobs_completed_total {len(job_history)}")
+    lines.append("# TYPE lattice9_pipeline_calls_total counter")
+    lines.append(f"lattice9_pipeline_calls_total {stats['total_jobs']}")
+    lines.append("# TYPE lattice9_avg_call_latency_ms gauge")
+    lines.append(f"lattice9_avg_call_latency_ms {stats['avg_latency_ms']}")
 
-    lines.append("# TYPE plasma_mesh_worker_jobs_processed counter")
-    lines.append("# TYPE plasma_mesh_worker_avg_latency_ms gauge")
-    lines.append("# TYPE plasma_mesh_worker_layers_assigned gauge")
+    lines.append("# TYPE lattice9_worker_jobs_processed counter")
+    lines.append("# TYPE lattice9_worker_avg_latency_ms gauge")
+    lines.append("# TYPE lattice9_worker_layers_assigned gauge")
     for w in scheduler.workers.values():
         labels = f'worker_id="{w.worker_id}"'
-        lines.append(f"plasma_mesh_worker_jobs_processed{{{labels}}} {w.jobs_processed}")
-        lines.append(f"plasma_mesh_worker_avg_latency_ms{{{labels}}} {w.avg_latency_ms}")
-        lines.append(f"plasma_mesh_worker_layers_assigned{{{labels}}} {len(w.assigned_layers)}")
+        lines.append(f"lattice9_worker_jobs_processed{{{labels}}} {w.jobs_processed}")
+        lines.append(f"lattice9_worker_avg_latency_ms{{{labels}}} {w.avg_latency_ms}")
+        lines.append(f"lattice9_worker_layers_assigned{{{labels}}} {len(w.assigned_layers)}")
 
     return StreamingResponse(
         iter(["\n".join(lines) + "\n"]),

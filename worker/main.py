@@ -10,6 +10,7 @@ from typing import Optional
 import httpx
 import psutil
 import torch
+torch.set_num_threads(1)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -120,7 +121,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title=f"Plasma-Mesh Worker ({WORKER_ID})", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title=f"Lattice9 Worker ({WORKER_ID})", version="3.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

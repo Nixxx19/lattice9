@@ -1,6 +1,6 @@
-# plasma-mesh
+# lattice9
 
-distributed llm inference. split a transformer across a pool of worker nodes, run each generated token through the full pipeline, get output that's bitwise identical to monolithic greedy decoding.
+deterministic token-to-token relay inference across worker nodes. split a transformer's layers across a pool of machines, relay each token through the full pipeline, and verify the output matches a monolithic run.
 
 defaults to `TinyLlama-1.1B-Chat` (1.1b params, 22 layers, instruction-tuned, ungated); swap to any huggingface model with `MODEL_NAME=...`.
 

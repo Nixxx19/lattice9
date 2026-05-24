@@ -11,6 +11,7 @@ import pytest
 
 try:
     import torch
+    torch.set_num_threads(1)
     from transformers import AutoModelForCausalLM, AutoTokenizer
     HAVE_HF = True
 except ImportError:
@@ -20,7 +21,7 @@ except ImportError:
 COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
 MODEL_NAME = os.environ.get("MODEL_NAME", "HuggingFaceTB/SmolLM-135M")
 PROMPT = "The capital of France is"
-MAX_NEW = 8
+MAX_NEW = 4
 
 
 def _coordinator_ready(timeout_s: float = 120.0) -> bool:

@@ -23,9 +23,9 @@ function App() {
           <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded bg-zinc-100 text-zinc-950 flex items-center justify-center font-semibold text-base">
-                p
+                l
               </div>
-              <h1 className="text-xl font-semibold tracking-tight">plasma-mesh</h1>
+              <h1 className="text-xl font-semibold tracking-tight">lattice9</h1>
               <span className="text-xs text-zinc-500 border border-zinc-800 px-2 py-0.5 rounded">
                 distributed inference
               </span>
