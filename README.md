@@ -1,6 +1,6 @@
 # lattice9
 
-deterministic token-to-token relay inference across worker nodes. split a transformer's layers across a pool of machines, relay each token through the full pipeline, and verify the output matches a monolithic run.
+deterministic token-to-token relay inference across worker nodes. split a transformer's layers across a pool of machines, relay each generated token through the full pipeline, and prove the math is bitwise-identical to a monolithic forward pass.
 
 defaults to `TinyLlama-1.1B-Chat` (1.1b params, 22 layers, instruction-tuned, ungated); swap to any huggingface model with `MODEL_NAME=...`.
 
@@ -14,7 +14,7 @@ python cli/main.py infer -p "the quick brown fox" -d
 - splits the model's transformer layers across a pool of workers as contiguous chunks
 - coordinator runs the autoregressive loop; each output token does a full pipeline pass
 - `--deterministic` mode uses greedy decoding so output is reproducible
-- ci asserts distributed output equals monolithic — if the math breaks, the build goes red
+- ci runs a math-level parity test: the sharded forward pass is asserted bitwise-identical to monolithic greedy in a single process — if the math breaks, the build goes red. a separate e2e smoke test verifies the running cluster produces sensible output.
 - if a worker dies mid-request, the coordinator reshards layers across survivors and retries
 - sse streaming endpoint emits each token with the worker that decoded it
 - dashboard renders tokens live, color-coded by worker
