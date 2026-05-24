@@ -76,6 +76,37 @@ async def health():
     return {"status": "ok", "service": "coordinator", "workers": len(scheduler.workers)}
 
 
+@app.get("/metrics")
+async def metrics():
+    lines: list[str] = []
+    stats = scheduler.get_throughput_stats()
+
+    lines.append("# TYPE hivemind_workers_total gauge")
+    lines.append(f"hivemind_workers_total {stats['workers_total']}")
+    lines.append("# TYPE hivemind_workers_active gauge")
+    lines.append(f"hivemind_workers_active {stats['workers_active']}")
+    lines.append("# TYPE hivemind_jobs_completed_total counter")
+    lines.append(f"hivemind_jobs_completed_total {len(job_history)}")
+    lines.append("# TYPE hivemind_pipeline_calls_total counter")
+    lines.append(f"hivemind_pipeline_calls_total {stats['total_jobs']}")
+    lines.append("# TYPE hivemind_avg_call_latency_ms gauge")
+    lines.append(f"hivemind_avg_call_latency_ms {stats['avg_latency_ms']}")
+
+    lines.append("# TYPE hivemind_worker_jobs_processed counter")
+    lines.append("# TYPE hivemind_worker_avg_latency_ms gauge")
+    lines.append("# TYPE hivemind_worker_layers_assigned gauge")
+    for w in scheduler.workers.values():
+        labels = f'worker_id="{w.worker_id}"'
+        lines.append(f"hivemind_worker_jobs_processed{{{labels}}} {w.jobs_processed}")
+        lines.append(f"hivemind_worker_avg_latency_ms{{{labels}}} {w.avg_latency_ms}")
+        lines.append(f"hivemind_worker_layers_assigned{{{labels}}} {len(w.assigned_layers)}")
+
+    return StreamingResponse(
+        iter(["\n".join(lines) + "\n"]),
+        media_type="text/plain; version=0.0.4",
+    )
+
+
 @app.post("/api/workers/register")
 async def register_worker(req: RegisterRequest):
     worker = scheduler.register_worker(req.worker_id, req.url, req.cpu_cores, req.memory_mb)
