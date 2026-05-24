@@ -77,7 +77,7 @@ services:
     depends_on:
       - coordinator
     environment:
-      - VITE_API_URL=http://coordinator:8000
+      - VITE_PROXY_TARGET=http://coordinator:8000
 
   cli:
     build: ./cli
