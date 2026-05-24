@@ -137,16 +137,16 @@ export default function Inference() {
           className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-4 py-3 text-base text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-none"
         />
 
-        <div className="mt-5 flex flex-wrap items-end gap-5">
-          <div>
-            <Label>max tokens</Label>
+        <div className="mt-5 flex flex-wrap items-center gap-5">
+          <div className="flex items-center gap-2 text-base text-zinc-300">
+            <span className="text-zinc-500">max tokens</span>
             <input
               type="number"
               value={maxTokens}
               onChange={(e) => update({ maxTokens: Number(e.target.value) })}
               min={1}
               max={500}
-              className="w-32 bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-base text-zinc-100 focus:outline-none focus:border-zinc-600"
+              className="w-24 bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-base text-zinc-100 focus:outline-none focus:border-zinc-600"
             />
           </div>
 
