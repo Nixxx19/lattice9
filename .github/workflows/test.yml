@@ -30,6 +30,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    env:
+      MODEL_NAME: gpt2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,10 +41,16 @@ jobs:
       - run: pip install -r requirements-dev.txt httpx
       - name: boot cluster
         run: docker compose up -d --build coordinator worker-1 worker-2 worker-3
-      - name: wait for coordinator
+      - name: wait for coordinator + workers
         run: |
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:8000/api/health > /dev/null; then echo ok; exit 0; fi
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8000/api/health > /dev/null; then
+              active=$(curl -s http://localhost:8000/api/workers | python -c "import sys,json; print(json.load(sys.stdin)['stats']['workers_active'])")
+              if [ "$active" -ge 3 ]; then echo "ready with $active workers"; exit 0; fi
+              echo "coordinator up; workers_active=$active, waiting..."
+            else
+              echo "coordinator not ready yet ($i)"
+            fi
             sleep 5
           done
           docker compose logs
