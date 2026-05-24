@@ -23,6 +23,7 @@ WORKER_PORT = int(os.environ.get("WORKER_PORT", "8001"))
 COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
 WORKER_HOST = os.environ.get("WORKER_HOST", "localhost")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt2")
+SHED_WEIGHTS = os.environ.get("SHED_WEIGHTS", "false").lower() in ("1", "true", "yes")
 
 
 tokenizer: Optional[GPT2Tokenizer] = None
@@ -47,11 +48,17 @@ def apply_assignment(layers: list[int], is_first: bool, is_last: bool) -> None:
     assigned_layers = layers
     is_first_in_chain = is_first
     is_last_in_chain = is_last
-    shard_model_inplace(model, layers, is_first, is_last)
-    print(
-        f"[{WORKER_ID}] sharded to layers {layers} "
-        f"(first={is_first}, last={is_last}) -> {model_memory_mb(model):.1f} MB"
-    )
+    if SHED_WEIGHTS:
+        shard_model_inplace(model, layers, is_first, is_last)
+        print(
+            f"[{WORKER_ID}] sharded to layers {layers} "
+            f"(first={is_first}, last={is_last}) -> {model_memory_mb(model):.1f} MB"
+        )
+    else:
+        print(
+            f"[{WORKER_ID}] assigned layers {layers} "
+            f"(first={is_first}, last={is_last}); full model kept for failure recovery"
+        )
 
 
 async def register_with_coordinator() -> None:

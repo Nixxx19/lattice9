@@ -114,6 +114,14 @@ async def list_jobs():
     return {"jobs": job_history[-50:]}
 
 
+@app.delete("/api/workers/{worker_id}")
+async def evict_worker(worker_id: str):
+    if worker_id not in scheduler.workers:
+        raise HTTPException(status_code=404, detail="unknown worker")
+    scheduler.remove_worker(worker_id)
+    return {"status": "evicted", "remaining": list(scheduler.workers.keys())}
+
+
 def _phase_for(idx: int, total: int) -> str:
     if total == 1:
         return "full"
@@ -122,6 +130,13 @@ def _phase_for(idx: int, total: int) -> str:
     if idx == total - 1:
         return "decode"
     return "middle"
+
+
+class WorkerCallError(Exception):
+    def __init__(self, worker_id: str, cause: Exception):
+        self.worker_id = worker_id
+        self.cause = cause
+        super().__init__(f"worker {worker_id}: {cause}")
 
 
 async def _pipeline_pass(
@@ -151,25 +166,36 @@ async def _pipeline_pass(
             resp = await http_client.post(
                 f"{assignment['url']}/api/process",
                 json=payload,
+                timeout=60.0,
             )
             resp.raise_for_status()
             result = resp.json()
         except Exception as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Worker {assignment['worker_id']} failed: {e}",
-            )
+            raise WorkerCallError(assignment["worker_id"], e)
         elapsed_ms = (time.time() - step_start) * 1000
 
         wid = assignment["worker_id"]
-        stats[wid]["calls"] += 1
-        stats[wid]["total_ms"] += elapsed_ms
+        if wid in stats:
+            stats[wid]["calls"] += 1
+            stats[wid]["total_ms"] += elapsed_ms
         scheduler.record_job(wid, elapsed_ms)
 
         if is_last:
             return result["logits"][0]
         hidden_states = result["hidden_states"]
     return []
+
+
+def _init_stats(assignments: list[dict]) -> dict[str, dict]:
+    return {
+        a["worker_id"]: {
+            "url": a["url"],
+            "layers": a["layers"],
+            "calls": 0,
+            "total_ms": 0.0,
+        }
+        for a in assignments
+    }
 
 
 def _sample_token(logits_row: list[float], req: InferRequest) -> int:
@@ -208,23 +234,48 @@ async def infer(req: InferRequest):
     prompt_token_count = len(generated_ids)
     eos_id = tokenizer.eos_token_id
 
-    stats: dict[str, dict] = {
-        a["worker_id"]: {
-            "url": a["url"],
-            "layers": a["layers"],
-            "calls": 0,
-            "total_ms": 0.0,
-        }
-        for a in assignments
-    }
+    stats: dict[str, dict] = _init_stats(assignments)
+    reshard_events: list[dict] = []
 
-    for _ in range(req.max_tokens):
-        logits_row = await _pipeline_pass(
-            assignments,
-            [generated_ids],
-            stats,
-            request_id,
-        )
+    for token_idx in range(req.max_tokens):
+        attempt = 0
+        while True:
+            try:
+                logits_row = await _pipeline_pass(
+                    assignments,
+                    [generated_ids],
+                    stats,
+                    request_id,
+                )
+                break
+            except WorkerCallError as e:
+                attempt += 1
+                scheduler.remove_worker(e.worker_id)
+                assignments = scheduler.get_worker_assignments()
+                if not assignments:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"all workers failed after {e.worker_id}",
+                    )
+                for a in assignments:
+                    stats.setdefault(a["worker_id"], {
+                        "url": a["url"],
+                        "layers": a["layers"],
+                        "calls": 0,
+                        "total_ms": 0.0,
+                    })
+                    stats[a["worker_id"]]["layers"] = a["layers"]
+                reshard_events.append({
+                    "token_index": token_idx,
+                    "dropped_worker": e.worker_id,
+                    "remaining": [a["worker_id"] for a in assignments],
+                })
+                if attempt > 5:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="too many reshards in a single token step",
+                    )
+
         next_token = _sample_token(logits_row, req)
         if next_token == eos_id:
             break
@@ -255,6 +306,7 @@ async def infer(req: InferRequest):
         "tokens_generated": tokens_generated,
         "total_latency_ms": round(total_ms, 2),
         "worker_trace": worker_trace,
+        "reshard_events": reshard_events,
         "timestamp": time.time(),
     }
     job_history.append(job_record)
