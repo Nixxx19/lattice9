@@ -27,3 +27,30 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: pytest tests/test_parity.py -v
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-dev.txt httpx
+      - name: boot cluster
+        run: docker compose up -d --build coordinator worker-1 worker-2 worker-3
+      - name: wait for coordinator
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/api/health > /dev/null; then echo ok; exit 0; fi
+            sleep 5
+          done
+          docker compose logs
+          exit 1
+      - name: run e2e parity
+        env:
+          COORDINATOR_URL: http://localhost:8000
+        run: pytest tests/test_e2e.py -v
+      - name: dump logs on failure
+        if: failure()
+        run: docker compose logs
