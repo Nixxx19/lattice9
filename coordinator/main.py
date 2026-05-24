@@ -32,8 +32,10 @@ class InferRequest(BaseModel):
     prompt: str
     max_tokens: int = 50
     deterministic: bool = False
-    temperature: float = 0.8
-    top_p: float = 0.95
+    temperature: float = 0.9
+    top_p: float = 0.92
+    repetition_penalty: float = 1.3
+    no_repeat_ngram_size: int = 3
 
 
 class InferResponse(BaseModel):
@@ -247,8 +249,34 @@ def _init_stats(assignments: list[dict]) -> dict[str, dict]:
     }
 
 
-def _sample_token(logits_row: list[float], req: InferRequest) -> int:
+def _apply_repetition_penalty(logits: torch.Tensor, generated: list[int], penalty: float) -> None:
+    if penalty == 1.0 or not generated:
+        return
+    seen = set(generated)
+    for tid in seen:
+        v = logits[tid].item()
+        logits[tid] = v / penalty if v > 0 else v * penalty
+
+
+def _banned_by_ngram(generated: list[int], ngram_size: int) -> set[int]:
+    if ngram_size <= 0 or len(generated) < ngram_size:
+        return set()
+    prefix = tuple(generated[-(ngram_size - 1):]) if ngram_size > 1 else ()
+    banned: set[int] = set()
+    for i in range(len(generated) - ngram_size + 1):
+        window = tuple(generated[i : i + ngram_size - 1])
+        if window == prefix:
+            banned.add(generated[i + ngram_size - 1])
+    return banned
+
+
+def _sample_token(logits_row: list[float], generated: list[int], req: InferRequest) -> int:
     logits = torch.tensor(logits_row)
+
+    _apply_repetition_penalty(logits, generated, req.repetition_penalty)
+    for tid in _banned_by_ngram(generated, req.no_repeat_ngram_size):
+        logits[tid] = -float("inf")
+
     if req.deterministic:
         return int(torch.argmax(logits).item())
 
@@ -325,7 +353,7 @@ async def infer(req: InferRequest):
                         detail="too many reshards in a single token step",
                     )
 
-        next_token = _sample_token(logits_row, req)
+        next_token = _sample_token(logits_row, generated_ids, req)
         if next_token == eos_id:
             break
         generated_ids.append(next_token)
@@ -435,7 +463,7 @@ async def _stream_inference(req: InferRequest) -> AsyncIterator[str]:
                     yield _sse("error", {"detail": "too many reshards"})
                     return
 
-        next_token = _sample_token(logits_row, req)
+        next_token = _sample_token(logits_row, generated_ids, req)
         if next_token == eos_id:
             break
         generated_ids.append(next_token)

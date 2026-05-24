@@ -201,7 +201,7 @@ export default function Inference() {
               <span
                 key={t.index}
                 className={workerColor(t.decode_worker, streamWorkers)}
-                title={`from ${t.decode_worker}`}
+                title={`pipeline: ${streamWorkers.join(" → ")} • finalized by ${t.decode_worker}`}
               >
                 {t.token_text}
               </span>
@@ -210,13 +210,21 @@ export default function Inference() {
           </p>
           {streamWorkers.length > 0 && (
             <div className="mt-5 flex flex-wrap gap-4 text-sm">
-              {streamWorkers.map((w) => (
+              {streamWorkers.map((w, i) => (
                 <span key={w} className={workerColor(w, streamWorkers)}>
                   ● <span className="text-zinc-400">{w}</span>
+                  <span className="text-zinc-600 ml-1">
+                    {i === 0 ? "(input)" : i === streamWorkers.length - 1 ? "(output)" : "(middle)"}
+                  </span>
                 </span>
               ))}
             </div>
           )}
+          <p className="mt-4 text-xs text-zinc-500 leading-relaxed">
+            every token passes through <strong>all</strong> workers in order.
+            color reflects the worker that finalized this token
+            (always the last one in the pipeline) — the others did the layers before it.
+          </p>
           {result && (
             <div className="mt-5 pt-4 border-t border-zinc-900 text-sm text-zinc-500 flex gap-5">
               <span>id {result.request_id}</span>

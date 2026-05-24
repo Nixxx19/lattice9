@@ -74,8 +74,14 @@ export default function Overview() {
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label="active workers" value={`${stats.workers_active}/${stats.workers_total}`} />
-          <StatCard label="total jobs" value={stats.total_jobs.toLocaleString()} />
-          <StatCard label="avg latency" value={`${stats.avg_latency_ms.toFixed(0)} ms`} />
+          <StatCard
+            label="total jobs"
+            value={stats.total_jobs > 0 ? stats.total_jobs.toLocaleString() : "—"}
+          />
+          <StatCard
+            label="avg latency"
+            value={stats.total_jobs > 0 ? `${stats.avg_latency_ms.toFixed(0)} ms` : "—"}
+          />
           <StatCard label="strategy" value={stats.strategy} mono />
         </div>
       )}
