@@ -119,11 +119,11 @@ function StatCard({
   mono?: boolean;
 }) {
   return (
-    <div className="border border-zinc-900 rounded-lg p-4 bg-zinc-950/40">
-      <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+    <div className="border border-zinc-900 rounded-lg p-5 bg-zinc-950/40">
+      <div className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
         {label}
       </div>
-      <div className={`text-lg font-semibold text-zinc-100 ${mono ? "font-mono" : ""}`}>
+      <div className={`text-2xl font-semibold text-zinc-100 ${mono ? "font-mono" : ""}`}>
         {value}
       </div>
     </div>
@@ -139,24 +139,24 @@ function WorkerCard({ worker }: { worker: Worker }) {
       : "—";
 
   return (
-    <div className="border border-zinc-900 rounded-lg p-4 bg-zinc-950/40">
+    <div className="border border-zinc-900 rounded-lg p-5 bg-zinc-950/40">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span
-            className={`inline-block w-1.5 h-1.5 rounded-full ${
+            className={`inline-block w-2 h-2 rounded-full ${
               isHealthy ? "bg-emerald-400" : "bg-rose-400"
             }`}
           />
-          <h3 className="font-medium text-zinc-100 text-sm">{worker.worker_id}</h3>
+          <h3 className="font-medium text-zinc-100 text-base">{worker.worker_id}</h3>
         </div>
-        <span className="text-[11px] text-zinc-500">
+        <span className="text-xs text-zinc-500">
           {isHealthy ? "healthy" : "offline"}
         </span>
       </div>
-      <div className="text-[11px] font-mono text-zinc-600 mb-3 truncate">
+      <div className="text-xs font-mono text-zinc-600 mb-4 truncate">
         {worker.url}
       </div>
-      <dl className="grid grid-cols-2 gap-y-1.5 text-xs">
+      <dl className="grid grid-cols-2 gap-y-2 text-sm">
         <dt className="text-zinc-500">cpu</dt>
         <dd className="text-zinc-300 text-right">{worker.cpu_cores} cores</dd>
         <dt className="text-zinc-500">memory</dt>
@@ -182,25 +182,25 @@ function WorkerCard({ worker }: { worker: Worker }) {
 
 function JobRow({ job }: { job: Job }) {
   return (
-    <div className="border border-zinc-900 rounded-lg p-3 bg-zinc-950/40">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[11px] font-mono text-zinc-500">
+    <div className="border border-zinc-900 rounded-lg p-4 bg-zinc-950/40">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-mono text-zinc-500">
           {job.request_id}
         </span>
-        <span className="text-[11px] text-zinc-500">
+        <span className="text-xs text-zinc-500">
           {job.tokens_generated} tokens · {job.total_latency_ms.toFixed(0)} ms
         </span>
       </div>
-      <p className="text-xs text-zinc-400 mb-1">
+      <p className="text-sm text-zinc-400 mb-1.5">
         <span className="text-zinc-600">prompt:</span> {job.prompt}
       </p>
-      <p className="text-xs text-zinc-200 line-clamp-2">{job.result}</p>
+      <p className="text-sm text-zinc-200 line-clamp-2">{job.result}</p>
       {job.worker_trace.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           {job.worker_trace.map((t, i) => (
             <span
               key={i}
-              className="text-[10px] font-mono text-zinc-500 border border-zinc-900 px-1.5 py-0.5 rounded"
+              className="text-xs font-mono text-zinc-500 border border-zinc-900 px-2 py-0.5 rounded"
             >
               {t.worker_id} · {t.latency_ms.toFixed(0)}ms
             </span>
@@ -213,7 +213,7 @@ function JobRow({ job }: { job: Job }) {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <h2 className="text-[11px] uppercase tracking-wider text-zinc-500 mb-3">
+    <h2 className="text-xs uppercase tracking-wider text-zinc-500 mb-4">
       {title}
     </h2>
   );
@@ -221,7 +221,7 @@ function SectionHeader({ title }: { title: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="border border-zinc-900 rounded-lg p-8 text-center text-sm text-zinc-600">
+    <div className="border border-zinc-900 rounded-lg p-10 text-center text-base text-zinc-600">
       {text}
     </div>
   );

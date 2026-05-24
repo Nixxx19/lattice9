@@ -134,10 +134,10 @@ export default function Inference() {
           onChange={(e) => update({ prompt: e.target.value })}
           placeholder="once upon a time in a distant galaxy"
           rows={3}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-none"
+          className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-4 py-3 text-base text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-600 resize-none"
         />
 
-        <div className="mt-4 flex flex-wrap items-end gap-4">
+        <div className="mt-5 flex flex-wrap items-end gap-5">
           <div>
             <Label>max tokens</Label>
             <input
@@ -146,16 +146,16 @@ export default function Inference() {
               onChange={(e) => update({ maxTokens: Number(e.target.value) })}
               min={1}
               max={500}
-              className="w-28 bg-zinc-950 border border-zinc-800 rounded-md px-3 py-1.5 text-sm text-zinc-100 focus:outline-none focus:border-zinc-600"
+              className="w-32 bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-base text-zinc-100 focus:outline-none focus:border-zinc-600"
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-zinc-300 select-none cursor-pointer">
+          <label className="flex items-center gap-2 text-base text-zinc-300 select-none cursor-pointer">
             <input
               type="checkbox"
               checked={stream}
               onChange={(e) => update({ stream: e.target.checked })}
-              className="accent-zinc-100"
+              className="accent-zinc-100 w-4 h-4"
             />
             stream tokens
           </label>
@@ -163,7 +163,7 @@ export default function Inference() {
           <button
             onClick={run}
             disabled={loading || !prompt.trim()}
-            className="ml-auto px-4 py-1.5 bg-zinc-100 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 rounded-md text-sm font-medium transition-colors"
+            className="ml-auto px-5 py-2 bg-zinc-100 hover:bg-white disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 rounded-md text-base font-medium transition-colors"
           >
             {loading ? "running…" : "run inference"}
           </button>
@@ -172,13 +172,13 @@ export default function Inference() {
 
       {error && (
         <Card tone="error">
-          <span className="text-sm">{error}</span>
+          <span className="text-base">{error}</span>
         </Card>
       )}
 
       {loading && stream && streamedTokens.length === 0 && (
         <Card>
-          <div className="flex items-center gap-2 text-sm text-zinc-400">
+          <div className="flex items-center gap-2 text-base text-zinc-400">
             <Dot pulse /> opening pipeline…
           </div>
         </Card>
@@ -186,7 +186,7 @@ export default function Inference() {
 
       {loading && !stream && (
         <Card>
-          <div className="flex items-center gap-2 text-sm text-zinc-400">
+          <div className="flex items-center gap-2 text-base text-zinc-400">
             <Dot pulse /> running inference…
           </div>
         </Card>
@@ -195,7 +195,7 @@ export default function Inference() {
       {streamedTokens.length > 0 && (
         <Card>
           <SectionHeader title="live tokens" />
-          <p className="leading-relaxed font-mono text-sm break-words">
+          <p className="leading-relaxed font-mono text-base break-words">
             <span className="text-zinc-500">{prompt}</span>
             {streamedTokens.map((t) => (
               <span
@@ -209,7 +209,7 @@ export default function Inference() {
             {loading && <span className="text-zinc-600 animate-pulse">▌</span>}
           </p>
           {streamWorkers.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-3 text-xs">
+            <div className="mt-5 flex flex-wrap gap-4 text-sm">
               {streamWorkers.map((w) => (
                 <span key={w} className={workerColor(w, streamWorkers)}>
                   ● <span className="text-zinc-400">{w}</span>
@@ -218,7 +218,7 @@ export default function Inference() {
             </div>
           )}
           {result && (
-            <div className="mt-4 pt-3 border-t border-zinc-900 text-xs text-zinc-500 flex gap-4">
+            <div className="mt-5 pt-4 border-t border-zinc-900 text-sm text-zinc-500 flex gap-5">
               <span>id {result.request_id}</span>
               <span>{result.tokens_generated} tokens</span>
               <span>{result.total_latency_ms.toFixed(0)}ms</span>
@@ -230,8 +230,8 @@ export default function Inference() {
       {result && streamedTokens.length === 0 && (
         <Card>
           <SectionHeader title="result" />
-          <p className="text-sm text-zinc-200 leading-relaxed">{result.result}</p>
-          <div className="mt-3 text-xs text-zinc-500 flex gap-4">
+          <p className="text-base text-zinc-200 leading-relaxed">{result.result}</p>
+          <div className="mt-4 text-sm text-zinc-500 flex gap-5">
             <span>id {result.request_id}</span>
             <span>{result.tokens_generated} tokens</span>
             <span>{result.total_latency_ms.toFixed(0)}ms</span>
@@ -242,7 +242,7 @@ export default function Inference() {
       {reshards.length > 0 && (
         <Card tone="warn">
           {reshards.map((r, i) => (
-            <div key={i} className="text-sm">
+            <div key={i} className="text-base">
               dropped <span className="font-mono">{r.dropped_worker}</span> at
               token {r.token_index}
               {r.remaining && (
@@ -277,7 +277,7 @@ function Card({
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-3">
+    <div className="text-xs uppercase tracking-wider text-zinc-500 mb-4">
       {title}
     </div>
   );
@@ -285,7 +285,7 @@ function SectionHeader({ title }: { title: string }) {
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+    <div className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
       {children}
     </div>
   );
@@ -294,7 +294,7 @@ function Label({ children }: { children: React.ReactNode }) {
 function Dot({ pulse }: { pulse?: boolean }) {
   return (
     <span
-      className={`inline-block w-1.5 h-1.5 rounded-full bg-zinc-300 ${
+      className={`inline-block w-2 h-2 rounded-full bg-zinc-300 ${
         pulse ? "animate-pulse" : ""
       }`}
     />
