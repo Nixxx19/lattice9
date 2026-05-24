@@ -1,5 +1,3 @@
-
-https://github.com/user-attachments/assets/3cafdc35-779d-4f63-9eed-94c03eeca302
 # lattice9
 
 deterministic token-to-token relay inference across worker nodes. split a transformer's layers across a pool of machines, relay each generated token through the full pipeline, and prove the math is bitwise-identical to a monolithic forward pass.
