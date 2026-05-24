@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MODEL_NAME: HuggingFaceTB/SmolLM-135M
+      TORCH_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -10,7 +10,9 @@ from typing import Optional
 import httpx
 import psutil
 import torch
-torch.set_num_threads(1)
+_n_threads = int(os.environ.get("TORCH_THREADS", "0"))
+if _n_threads > 0:
+    torch.set_num_threads(_n_threads)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel

@@ -11,7 +11,9 @@ import pytest
 
 try:
     import torch
-    torch.set_num_threads(1)
+    _n_threads = int(os.environ.get("TORCH_THREADS", "0"))
+    if _n_threads > 0:
+        torch.set_num_threads(_n_threads)
     from transformers import AutoModelForCausalLM, AutoTokenizer
     HAVE_HF = True
 except ImportError:

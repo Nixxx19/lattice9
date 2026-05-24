@@ -2,6 +2,7 @@ version: "3.9"
 
 x-model: &model
   MODEL_NAME: ${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
+  TORCH_THREADS: ${TORCH_THREADS:-0}
 
 services:
   coordinator:
