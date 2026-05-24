@@ -12,9 +12,7 @@ from typing import Optional
 
 
 class Strategy(str, Enum):
-    # Equal contiguous chunks. With 12 layers and 3 workers: [0-3], [4-7], [8-11].
     UNIFORM = "uniform"
-    # Contiguous chunks weighted by each worker's capacity_score.
     CAPACITY = "capacity"
 
 
@@ -87,9 +85,6 @@ class Scheduler:
         ]
 
     def _reassign_layers(self) -> None:
-        # Pipeline parallelism requires each worker to own a contiguous block of
-        # layers — interleaved assignments would break the forward pass because
-        # block N+1 depends on block N's output.
         healthy = self.get_healthy_workers()
         if not healthy:
             return
