@@ -13,7 +13,7 @@ import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from sharding import model_memory_mb, shard_model_inplace
 
@@ -22,12 +22,12 @@ WORKER_ID = os.environ.get("WORKER_ID", f"worker-{uuid.uuid4().hex[:6]}")
 WORKER_PORT = int(os.environ.get("WORKER_PORT", "8001"))
 COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
 WORKER_HOST = os.environ.get("WORKER_HOST", "localhost")
-MODEL_NAME = os.environ.get("MODEL_NAME", "gpt2-large")
+MODEL_NAME = os.environ.get("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 SHED_WEIGHTS = os.environ.get("SHED_WEIGHTS", "false").lower() in ("1", "true", "yes")
 
 
-tokenizer: Optional[GPT2Tokenizer] = None
-model: Optional[GPT2LMHeadModel] = None
+tokenizer: Optional[AutoTokenizer] = None
+model = None
 assigned_layers: list[int] = []
 is_first_in_chain: bool = False
 is_last_in_chain: bool = False
@@ -36,11 +36,12 @@ is_last_in_chain: bool = False
 def load_full_model() -> None:
     global tokenizer, model
     print(f"[{WORKER_ID}] loading {MODEL_NAME}")
-    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
-    tokenizer.pad_token = tokenizer.eos_token
-    model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float32)
     model.eval()
-    print(f"[{WORKER_ID}] full model loaded ({model_memory_mb(model):.1f} MB)")
+    print(f"[{WORKER_ID}] full model loaded ({model_memory_mb(model):.1f} MB), {len(model.model.layers)} layers")
 
 
 def apply_assignment(layers: list[int], is_first: bool, is_last: bool) -> None:
@@ -68,7 +69,7 @@ async def register_with_coordinator() -> None:
         "url": f"http://{WORKER_HOST}:{WORKER_PORT}",
         "cpu_cores": psutil.cpu_count(logical=False) or 1,
         "memory_mb": int(psutil.virtual_memory().total / (1024 * 1024)),
-        "total_layers": len(model.transformer.h),
+        "total_layers": len(model.model.layers),
         "model_name": MODEL_NAME,
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -119,7 +120,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title=f"Hivemind Worker ({WORKER_ID})", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title=f"Plasma-Mesh Worker ({WORKER_ID})", version="3.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -137,21 +138,35 @@ class ProcessRequest(BaseModel):
     request_id: str = ""
 
 
-def _run_assigned_layers(hidden_states: torch.Tensor, layers: list[int]) -> torch.Tensor:
+def _causal_mask(seq_len: int, dtype: torch.dtype) -> torch.Tensor:
+    mask = torch.full((seq_len, seq_len), torch.finfo(dtype).min, dtype=dtype)
+    mask = torch.triu(mask, diagonal=1)
+    return mask.unsqueeze(0).unsqueeze(0)
+
+
+def _run_assigned_layers(
+    hidden_states: torch.Tensor,
+    layers: list[int],
+    position_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+) -> torch.Tensor:
     for layer_idx in layers:
-        if layer_idx >= len(model.transformer.h):
+        if layer_idx >= len(model.model.layers):
             continue
-        block = model.transformer.h[layer_idx]
-        hidden_states = block(hidden_states)[0]
+        block = model.model.layers[layer_idx]
+        outputs = block(
+            hidden_states,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            use_cache=False,
+        )
+        hidden_states = outputs[0]
     return hidden_states
 
 
 def _embed(input_ids_list: list[list[int]]) -> torch.Tensor:
     input_ids = torch.tensor(input_ids_list, dtype=torch.long)
-    seq_len = input_ids.shape[1]
-    positions = torch.arange(seq_len, dtype=torch.long).unsqueeze(0)
-    hidden_states = model.transformer.wte(input_ids) + model.transformer.wpe(positions)
-    return model.transformer.drop(hidden_states)
+    return model.model.embed_tokens(input_ids)
 
 
 @app.get("/api/health")
@@ -163,20 +178,6 @@ async def health():
         "cpu_percent": psutil.cpu_percent(),
         "memory_percent": psutil.virtual_memory().percent,
     }
-
-
-@app.post("/api/tokenize")
-async def tokenize(payload: dict):
-    text = payload.get("text", "")
-    ids = tokenizer(text, return_tensors="pt")["input_ids"].tolist()
-    return {"input_ids": ids, "eos_token_id": tokenizer.eos_token_id}
-
-
-@app.post("/api/decode")
-async def decode_text(payload: dict):
-    ids = payload.get("input_ids", [])
-    text = tokenizer.decode(ids, skip_special_tokens=True)
-    return {"text": text}
 
 
 @app.post("/api/process")
@@ -191,12 +192,16 @@ async def process(req: ProcessRequest):
         else:
             if req.hidden_states is None:
                 return {"error": "non-first phase requires hidden_states"}
-            hidden_states = torch.tensor(req.hidden_states)
+            hidden_states = torch.tensor(req.hidden_states, dtype=torch.float32)
 
-        hidden_states = _run_assigned_layers(hidden_states, req.layers)
+        seq_len = hidden_states.shape[1]
+        position_ids = torch.arange(seq_len, dtype=torch.long).unsqueeze(0)
+        attention_mask = _causal_mask(seq_len, hidden_states.dtype)
+
+        hidden_states = _run_assigned_layers(hidden_states, req.layers, position_ids, attention_mask)
 
         if req.is_last:
-            hidden_states = model.transformer.ln_f(hidden_states)
+            hidden_states = model.model.norm(hidden_states)
             last_logits = model.lm_head(hidden_states[:, -1, :])
             payload = {"logits": last_logits.tolist()}
         else:

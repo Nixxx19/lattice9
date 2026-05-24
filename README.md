@@ -1,8 +1,8 @@
-# hivemind
+# plasma-mesh
 
 distributed llm inference. split a transformer across a pool of worker nodes, run each generated token through the full pipeline, get output that's bitwise identical to monolithic greedy decoding.
 
-defaults to `gpt2-large` (774m params, 36 layers); needs ~12gb of docker memory for three workers, or swap to a smaller variant with `MODEL_NAME=gpt2-medium`.
+defaults to `TinyLlama-1.1B-Chat` (1.1b params, 22 layers, instruction-tuned, ungated); swap to any huggingface model with `MODEL_NAME=...`.
 
 ```bash
 docker compose up --build
@@ -39,9 +39,9 @@ flowchart TB
 
     subgraph pool["worker pool"]
         direction LR
-        worker1["worker 1 :8001<br/>layers 0–11"]
-        worker2["worker 2 :8002<br/>layers 12–23"]
-        worker3["worker 3 :8003<br/>layers 24–35"]
+        worker1["worker 1 :8001<br/>layers 0–7"]
+        worker2["worker 2 :8002<br/>layers 8–14"]
+        worker3["worker 3 :8003<br/>layers 15–21"]
     end
 
     cli <-->|"post /api/infer"| coordinator
@@ -61,25 +61,25 @@ the coordinator owns the loop. each output token costs one full pass through the
 sequenceDiagram
     autonumber
     participant c as coordinator
-    participant w1 as worker 1<br/>(layers 0–11)
-    participant w2 as worker 2<br/>(layers 12–23)
-    participant w3 as worker 3<br/>(layers 24–35)
+    participant w1 as worker 1<br/>(layers 0–7)
+    participant w2 as worker 2<br/>(layers 8–14)
+    participant w3 as worker 3<br/>(layers 15–21)
 
     c->>w1: input_ids + is_first=true
-    note right of w1: embed → run layers 0–11
+    note right of w1: embed → run layers 0–7
     w1-->>c: hidden_states
     c->>w2: hidden_states
-    note right of w2: run layers 12–23
+    note right of w2: run layers 8–14
     w2-->>c: hidden_states
     c->>w3: hidden_states + is_last=true
-    note right of w3: run layers 24–35 →<br/>ln_f → lm_head
+    note right of w3: run layers 15–21 →<br/>norm → lm_head
     w3-->>c: logits[last]
     note over c: sample next token<br/>(greedy if deterministic)<br/>append, loop
 ```
 
 ## how layers are sharded
 
-the uniform strategy gives every worker a contiguous chunk of the model's transformer blocks. with 36 layers and 3 workers, that's `w1:0–11`, `w2:12–23`, `w3:24–35`. remainder layers (when the count doesn't divide evenly) go to the earliest workers. interleaved assignment is forbidden — block n+1 depends on block n, so non-contiguous chunks would break the forward pass. the capacity strategy weights chunk size by `cpu_cores + memory_mb/1024`; chunks are still contiguous.
+the uniform strategy gives every worker a contiguous chunk of the model's transformer blocks. with tinyllama's 22 layers and 3 workers, that's `w1:0–7`, `w2:8–14`, `w3:15–21`. remainder layers (when the count doesn't divide evenly) go to the earliest workers. interleaved assignment is forbidden — block n+1 depends on block n, so non-contiguous chunks would break the forward pass. the capacity strategy weights chunk size by `cpu_cores + memory_mb/1024`; chunks are still contiguous.
 
 ## what happens when a worker dies
 
@@ -93,15 +93,15 @@ sequenceDiagram
     participant w2 as worker 2 💀
     participant w3 as worker 3
 
-    c->>w1: input_ids (layers 0–11)
+    c->>w1: input_ids (layers 0–7)
     w1-->>c: hidden_states
-    c->>w2: hidden_states (layers 12–23)
+    c->>w2: hidden_states (layers 8–14)
     w2--xc: connection refused
-    note over c: catch, evict w2,<br/>reshard to w1:0–17, w3:18–35
+    note over c: catch, evict w2,<br/>reshard to w1:0–10, w3:11–21
     note over c: emit sse "reshard"
-    c->>w1: input_ids (layers 0–17)
+    c->>w1: input_ids (layers 0–10)
     w1-->>c: hidden_states
-    c->>w3: hidden_states (layers 18–35, is_last)
+    c->>w3: hidden_states (layers 11–21, is_last)
     w3-->>c: logits
     note over c: sample, continue loop
 ```
@@ -152,8 +152,8 @@ the stream continues. a `reshard` event marks the topology change.
 | layer | tech |
 |---|---|
 | coordinator | fastapi, httpx, pytorch (tokenizer + sampler) |
-| worker | fastapi, pytorch, transformers (gpt-2) |
+| worker | fastapi, pytorch, transformers (any causal lm) |
 | cli | click, rich |
 | dashboard | react 18, typescript, vite, tailwind |
 | orchestration | docker compose |
-| model | gpt2-large (774m, 36 layers) by default; swap via `MODEL_NAME` |
+| model | tinyllama-1.1b-chat (1.1b, 22 layers) by default; swap via `MODEL_NAME` |

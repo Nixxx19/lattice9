@@ -1,7 +1,7 @@
 version: "3.9"
 
 x-model: &model
-  MODEL_NAME: ${MODEL_NAME:-gpt2-large}
+  MODEL_NAME: ${MODEL_NAME:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
 
 services:
   coordinator:

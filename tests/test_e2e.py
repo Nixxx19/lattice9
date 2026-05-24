@@ -11,15 +11,16 @@ import pytest
 
 try:
     import torch
-    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     HAVE_HF = True
 except ImportError:
     HAVE_HF = False
 
 
 COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
-PROMPT = "The quick brown fox"
-MAX_NEW = 12
+MODEL_NAME = os.environ.get("MODEL_NAME", "HuggingFaceTB/SmolLM-135M")
+PROMPT = "The capital of France is"
+MAX_NEW = 8
 
 
 def _coordinator_ready(timeout_s: float = 120.0) -> bool:
@@ -47,9 +48,10 @@ def test_distributed_matches_monolithic_greedy():
     resp.raise_for_status()
     distributed_text = resp.json()["result"]
 
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokenizer.pad_token = tokenizer.eos_token
-    model = GPT2LMHeadModel.from_pretrained("gpt2")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float32)
     model.eval()
 
     input_ids = tokenizer(PROMPT, return_tensors="pt")["input_ids"]

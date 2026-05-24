@@ -7,19 +7,23 @@ import pytest
 import torch
 
 try:
-    from transformers import GPT2LMHeadModel, GPT2Tokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     HAVE_TRANSFORMERS = True
 except ImportError:
     HAVE_TRANSFORMERS = False
+
+
+MODEL_NAME = "HuggingFaceTB/SmolLM-135M"
 
 
 @pytest.fixture(scope="module")
 def model_and_tokenizer():
     if not HAVE_TRANSFORMERS:
         pytest.skip("transformers not installed")
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokenizer.pad_token = tokenizer.eos_token
-    model = GPT2LMHeadModel.from_pretrained("gpt2")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch.float32)
     model.eval()
     return model, tokenizer
 
@@ -37,9 +41,20 @@ def monolithic_greedy(model, tokenizer, prompt: str, max_new_tokens: int) -> lis
     return output[0].tolist()
 
 
-def _run_chunk(model, hidden_states: torch.Tensor, layer_indices: list[int]) -> torch.Tensor:
+def _causal_mask(seq_len: int, dtype: torch.dtype) -> torch.Tensor:
+    m = torch.full((seq_len, seq_len), torch.finfo(dtype).min, dtype=dtype)
+    return torch.triu(m, diagonal=1).unsqueeze(0).unsqueeze(0)
+
+
+def _run_chunk(model, hidden_states, layer_indices, position_ids, attention_mask):
     for idx in layer_indices:
-        hidden_states = model.transformer.h[idx](hidden_states)[0]
+        layer = model.model.layers[idx]
+        hidden_states = layer(
+            hidden_states,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            use_cache=False,
+        )[0]
     return hidden_states
 
 
@@ -50,16 +65,16 @@ def sharded_greedy(model, tokenizer, prompt: str, max_new_tokens: int, shards: l
     for _ in range(max_new_tokens):
         input_ids = torch.tensor([tokens], dtype=torch.long)
         seq_len = input_ids.shape[1]
-        positions = torch.arange(seq_len, dtype=torch.long).unsqueeze(0)
+        position_ids = torch.arange(seq_len, dtype=torch.long).unsqueeze(0)
 
         with torch.no_grad():
-            hidden = model.transformer.wte(input_ids) + model.transformer.wpe(positions)
-            hidden = model.transformer.drop(hidden)
+            hidden = model.model.embed_tokens(input_ids)
+            attention_mask = _causal_mask(seq_len, hidden.dtype)
 
             for shard in shards:
-                hidden = _run_chunk(model, hidden, shard)
+                hidden = _run_chunk(model, hidden, shard, position_ids, attention_mask)
 
-            hidden = model.transformer.ln_f(hidden)
+            hidden = model.model.norm(hidden)
             logits = model.lm_head(hidden[:, -1, :])
             next_token = int(torch.argmax(logits, dim=-1).item())
 
@@ -70,16 +85,25 @@ def sharded_greedy(model, tokenizer, prompt: str, max_new_tokens: int, shards: l
     return tokens
 
 
-@pytest.mark.parametrize("shards", [
-    [list(range(12))],
-    [list(range(6)), list(range(6, 12))],
-    [list(range(4)), list(range(4, 8)), list(range(8, 12))],
-    [list(range(3)), list(range(3, 6)), list(range(6, 9)), list(range(9, 12))],
-])
-def test_sharded_matches_monolithic(model_and_tokenizer, shards):
+def _shards_for(n_layers: int, n_workers: int) -> list[list[int]]:
+    base = n_layers // n_workers
+    rem = n_layers % n_workers
+    out, start = [], 0
+    for i in range(n_workers):
+        count = base + (1 if i < rem else 0)
+        out.append(list(range(start, start + count)))
+        start += count
+    return out
+
+
+@pytest.mark.parametrize("n_workers", [1, 2, 3, 4])
+def test_sharded_matches_monolithic(model_and_tokenizer, n_workers):
     model, tokenizer = model_and_tokenizer
-    prompt = "The future of artificial intelligence is"
-    max_new = 15
+    prompt = "The capital of France is"
+    max_new = 8
+
+    n_layers = len(model.model.layers)
+    shards = _shards_for(n_layers, n_workers)
 
     mono = monolithic_greedy(model, tokenizer, prompt, max_new)
     shard = sharded_greedy(model, tokenizer, prompt, max_new, shards)

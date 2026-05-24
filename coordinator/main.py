@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from transformers import GPT2Tokenizer
+from transformers import AutoTokenizer
 
 from scheduler import Scheduler, Strategy
 
@@ -51,25 +51,26 @@ class HeartbeatRequest(BaseModel):
     worker_id: str
 
 
-DEFAULT_MODEL = os.environ.get("MODEL_NAME", "gpt2-large")
+DEFAULT_MODEL = os.environ.get("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 scheduler = Scheduler(strategy=Strategy.UNIFORM, total_layers=0)
 active_model: str = DEFAULT_MODEL
 job_history: list[dict] = []
 http_client: httpx.AsyncClient | None = None
-tokenizer: GPT2Tokenizer | None = None
+tokenizer = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global http_client, tokenizer
     http_client = httpx.AsyncClient(timeout=120.0)
-    tokenizer = GPT2Tokenizer.from_pretrained(DEFAULT_MODEL)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     yield
     await http_client.aclose()
 
 
-app = FastAPI(title="Hivemind Coordinator", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Plasma-Mesh Coordinator", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -88,25 +89,25 @@ async def metrics():
     lines: list[str] = []
     stats = scheduler.get_throughput_stats()
 
-    lines.append("# TYPE hivemind_workers_total gauge")
-    lines.append(f"hivemind_workers_total {stats['workers_total']}")
-    lines.append("# TYPE hivemind_workers_active gauge")
-    lines.append(f"hivemind_workers_active {stats['workers_active']}")
-    lines.append("# TYPE hivemind_jobs_completed_total counter")
-    lines.append(f"hivemind_jobs_completed_total {len(job_history)}")
-    lines.append("# TYPE hivemind_pipeline_calls_total counter")
-    lines.append(f"hivemind_pipeline_calls_total {stats['total_jobs']}")
-    lines.append("# TYPE hivemind_avg_call_latency_ms gauge")
-    lines.append(f"hivemind_avg_call_latency_ms {stats['avg_latency_ms']}")
+    lines.append("# TYPE plasma_mesh_workers_total gauge")
+    lines.append(f"plasma_mesh_workers_total {stats['workers_total']}")
+    lines.append("# TYPE plasma_mesh_workers_active gauge")
+    lines.append(f"plasma_mesh_workers_active {stats['workers_active']}")
+    lines.append("# TYPE plasma_mesh_jobs_completed_total counter")
+    lines.append(f"plasma_mesh_jobs_completed_total {len(job_history)}")
+    lines.append("# TYPE plasma_mesh_pipeline_calls_total counter")
+    lines.append(f"plasma_mesh_pipeline_calls_total {stats['total_jobs']}")
+    lines.append("# TYPE plasma_mesh_avg_call_latency_ms gauge")
+    lines.append(f"plasma_mesh_avg_call_latency_ms {stats['avg_latency_ms']}")
 
-    lines.append("# TYPE hivemind_worker_jobs_processed counter")
-    lines.append("# TYPE hivemind_worker_avg_latency_ms gauge")
-    lines.append("# TYPE hivemind_worker_layers_assigned gauge")
+    lines.append("# TYPE plasma_mesh_worker_jobs_processed counter")
+    lines.append("# TYPE plasma_mesh_worker_avg_latency_ms gauge")
+    lines.append("# TYPE plasma_mesh_worker_layers_assigned gauge")
     for w in scheduler.workers.values():
         labels = f'worker_id="{w.worker_id}"'
-        lines.append(f"hivemind_worker_jobs_processed{{{labels}}} {w.jobs_processed}")
-        lines.append(f"hivemind_worker_avg_latency_ms{{{labels}}} {w.avg_latency_ms}")
-        lines.append(f"hivemind_worker_layers_assigned{{{labels}}} {len(w.assigned_layers)}")
+        lines.append(f"plasma_mesh_worker_jobs_processed{{{labels}}} {w.jobs_processed}")
+        lines.append(f"plasma_mesh_worker_avg_latency_ms{{{labels}}} {w.avg_latency_ms}")
+        lines.append(f"plasma_mesh_worker_layers_assigned{{{labels}}} {len(w.assigned_layers)}")
 
     return StreamingResponse(
         iter(["\n".join(lines) + "\n"]),

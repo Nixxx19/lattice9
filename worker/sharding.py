@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import gc
-from typing import Optional
 
-import torch
 import torch.nn as nn
 
 
@@ -13,29 +11,21 @@ def shard_model_inplace(
     is_first: bool,
     is_last: bool,
 ) -> None:
-    """Drop parameters this worker won't use. Blocks outside `assigned_layers`
-    become Identity placeholders so indexed access stays valid."""
-
-    for i in range(len(model.transformer.h)):
+    for i in range(len(model.model.layers)):
         if i not in assigned_layers:
-            model.transformer.h[i] = nn.Identity()
+            model.model.layers[i] = nn.Identity()
 
     if not is_first:
-        model.transformer.drop = nn.Identity()
-
-    if not is_first and not is_last:
-        model.transformer.wte = None
-        model.transformer.wpe = None
+        model.model.embed_tokens = None
 
     if not is_last:
-        model.transformer.ln_f = nn.Identity()
+        model.model.norm = nn.Identity()
         if not is_first:
             model.lm_head = None
 
     for p in model.parameters():
-        if p.is_leaf and not p.requires_grad:
-            continue
-        p.requires_grad_(False)
+        if p.requires_grad:
+            p.requires_grad_(False)
 
     gc.collect()
 

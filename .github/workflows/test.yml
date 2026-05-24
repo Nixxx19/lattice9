@@ -31,7 +31,7 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
-      MODEL_NAME: gpt2
+      MODEL_NAME: HuggingFaceTB/SmolLM-135M
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
