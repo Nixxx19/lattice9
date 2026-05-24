@@ -34,7 +34,7 @@ export interface InferenceSession {
 
 export const emptySession: InferenceSession = {
   prompt: "",
-  maxTokens: 80,
+  maxTokens: 200,
   stream: true,
   loading: false,
   error: null,

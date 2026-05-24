@@ -52,7 +52,7 @@ class HeartbeatRequest(BaseModel):
 
 
 DEFAULT_MODEL = os.environ.get("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-STOP_STRINGS = ("<|user|>", "</|user|>", "<|assistant|>", "<|system|>", "<|im_end|>", "<|endoftext|>")
+STOP_STRINGS = ("<|user|>", "</|user|>", "<|assistant|>", "<|system|>", "<|im_end|>", "<|endoftext|>", "\n\n\n")
 
 
 def _stop_truncate(generated_text: str) -> tuple[str, bool]:

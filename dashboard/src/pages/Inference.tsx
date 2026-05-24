@@ -195,35 +195,19 @@ export default function Inference() {
       {streamedTokens.length > 0 && (
         <Card>
           <SectionHeader title="live tokens" />
-          <p className="leading-relaxed font-mono text-base break-words">
+          <p className="leading-relaxed font-mono text-base break-words text-zinc-100">
             <span className="text-zinc-500">{prompt}</span>
             {streamedTokens.map((t) => (
-              <span
-                key={t.index}
-                className={workerColor(t.decode_worker, streamWorkers)}
-                title={`pipeline: ${streamWorkers.join(" → ")} • finalized by ${t.decode_worker}`}
-              >
-                {t.token_text}
-              </span>
+              <span key={t.index}>{t.token_text}</span>
             ))}
             {loading && <span className="text-zinc-600 animate-pulse">▌</span>}
           </p>
           {streamWorkers.length > 0 && (
-            <div className="mt-5 flex flex-wrap gap-4 text-sm">
-              {streamWorkers.map((w, i) => (
-                <span key={w} className={workerColor(w, streamWorkers)}>
-                  ● <span className="text-zinc-400">{w}</span>
-                  <span className="text-zinc-600 ml-1">
-                    {i === 0 ? "(input)" : i === streamWorkers.length - 1 ? "(output)" : "(middle)"}
-                  </span>
-                </span>
-              ))}
-            </div>
+            <PipelineActivity workers={streamWorkers} tokens={streamedTokens} />
           )}
           <p className="mt-4 text-xs text-zinc-500 leading-relaxed">
-            every token passes through <strong>all</strong> workers in order.
-            color reflects the worker that finalized this token
-            (always the last one in the pipeline) — the others did the layers before it.
+            every token passes through <strong>all</strong> workers in sequence.
+            the bars above show each worker's share of the work in real time.
           </p>
           {result && (
             <div className="mt-5 pt-4 border-t border-zinc-900 text-sm text-zinc-500 flex gap-5">
@@ -262,6 +246,53 @@ export default function Inference() {
           ))}
         </Card>
       )}
+    </div>
+  );
+}
+
+const WORKER_BAR_COLORS = [
+  "bg-sky-500",
+  "bg-violet-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-cyan-500",
+];
+
+function PipelineActivity({
+  workers,
+  tokens,
+}: {
+  workers: string[];
+  tokens: { decode_worker: string }[];
+}) {
+  const totalTokens = Math.max(tokens.length, 1);
+  return (
+    <div className="mt-5 space-y-2.5">
+      {workers.map((w, i) => {
+        const role =
+          i === 0 ? "input" : i === workers.length - 1 ? "output" : "middle";
+        const calls = tokens.length;
+        const pct = totalTokens > 0 ? (calls / totalTokens) * 100 : 0;
+        const barColor = WORKER_BAR_COLORS[i % WORKER_BAR_COLORS.length];
+        return (
+          <div key={w} className="text-sm">
+            <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+              <span>
+                <span className="text-zinc-200">{w}</span>
+                <span className="text-zinc-600 ml-2">{role}</span>
+              </span>
+              <span className="text-zinc-500 font-mono">{calls} calls</span>
+            </div>
+            <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${barColor} transition-all duration-150`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
