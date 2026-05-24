@@ -1,132 +1,191 @@
-# Hivemind
+# hivemind
 
-Distributed LLM inference across a pool of worker nodes. Splits GPT-2's transformer layers across machines, runs each generated token through the full pipeline, and produces output that's **provably identical** to monolithic greedy decoding.
+distributed llm inference. split a transformer across a pool of worker nodes, run each generated token through the full pipeline, get output that's bitwise identical to monolithic greedy decoding.
+
+defaults to `gpt2-large` (774m params, 36 layers); swap to any model with `MODEL_NAME=...`.
 
 ```bash
 docker compose up --build
-python cli/main.py infer -p "The quick brown fox" -d   # deterministic mode
+python cli/main.py infer -p "the quick brown fox" -d
 ```
 
-## What it actually does
+## what it does
 
-- **Pipeline parallelism, for real.** Each worker holds a contiguous range of transformer layers. Hidden states flow worker → worker between layers. The coordinator runs an autoregressive loop, pulling one token per pipeline pass.
-- **Provable correctness.** A `--deterministic` flag uses greedy decoding. CI runs a parity test that asserts the distributed output equals a locally-computed monolithic run. If the math is wrong, the build is red.
-- **Live failure recovery.** Kill a worker mid-request and the coordinator catches the failure, re-shards layers across surviving workers, and retries. The dashboard shows reshard events as they happen.
-- **Token-level streaming.** SSE endpoint emits each token as it's generated, with the worker that decoded it. The dashboard renders tokens color-coded by worker as they arrive.
-- **Optional weight shedding.** Workers can drop layers they aren't assigned (`SHED_WEIGHTS=true`) to demonstrate real memory savings. Off by default so failure recovery can re-distribute work.
+- splits the model's transformer layers across a pool of workers as contiguous chunks
+- coordinator runs the autoregressive loop; each output token does a full pipeline pass
+- `--deterministic` mode uses greedy decoding so output is reproducible
+- ci asserts distributed output equals monolithic — if the math breaks, the build goes red
+- if a worker dies mid-request, the coordinator reshards layers across survivors and retries
+- sse streaming endpoint emits each token with the worker that decoded it
+- dashboard renders tokens live, color-coded by worker
+- prometheus `/metrics` for throughput, per-worker latency, layer counts
 
-## Architecture
+## system overview
 
 ```mermaid
 flowchart TB
-    subgraph Clients
+    subgraph clients
         direction LR
-        CLI[CLI]
-        Dashboard[React Dashboard :5173]
+        cli[cli]
+        dashboard[react dashboard :5173]
     end
 
-    subgraph CoordSvc["Coordinator Service"]
+    subgraph coordsvc["coordinator service"]
         direction LR
-        Coordinator["FastAPI :8000<br/>tokenizer + sampler"]
-        Scheduler[Scheduler]
-        Coordinator <--> Scheduler
+        coordinator["fastapi :8000<br/>tokenizer + sampler"]
+        scheduler[scheduler]
+        coordinator <--> scheduler
     end
 
-    subgraph Pool["Worker Pool"]
+    subgraph pool["worker pool"]
         direction LR
-        Worker1["Worker 1 :8001<br/>layers 0–3"]
-        Worker2["Worker 2 :8002<br/>layers 4–7"]
-        Worker3["Worker 3 :8003<br/>layers 8–11"]
+        worker1["worker 1 :8001<br/>layers 0–11"]
+        worker2["worker 2 :8002<br/>layers 12–23"]
+        worker3["worker 3 :8003<br/>layers 24–35"]
     end
 
-    CLI <-->|"POST /api/infer"| Coordinator
-    Dashboard <-->|"POST /api/infer/stream<br/>GET /api/workers"| Coordinator
+    cli <-->|"post /api/infer"| coordinator
+    dashboard <-->|"post /api/infer/stream"| coordinator
 
-    Scheduler -->|assigns layers| Worker1
-    Worker1 -->|hidden states| Worker2
-    Worker2 -->|hidden states| Worker3
-    Worker3 -->|next-token logits| Coordinator
+    scheduler -->|assigns layers| worker1
+    worker1 -->|hidden states| worker2
+    worker2 -->|hidden states| worker3
+    worker3 -->|next-token logits| coordinator
 ```
 
-## How a request flows
+## how one token is generated
 
-1. Coordinator tokenizes the prompt once.
-2. For each output token (loop):
-   - Worker 0 embeds the current token sequence and runs its layers → emits hidden states.
-   - Middle workers receive hidden states, run their layers, pass on.
-   - Final worker runs its layers, applies `ln_f` and `lm_head`, returns logits for the last position.
-   - Coordinator samples the next token (greedy if `deterministic=true`, top-p otherwise).
-   - If EOS, stop. Otherwise append and loop.
-3. If a worker call fails: drop it from the scheduler, re-shard contiguous layer ranges across the survivors, retry the current token. Recorded in `reshard_events` on the response.
+the coordinator owns the loop. each output token costs one full pass through the chain: embed on the first worker, transit middle workers, finalize on the last worker, sample, append, repeat.
 
-The autoregressive loop deliberately lives in the coordinator, not in the last worker. That's what makes the layer split real — every output token is a full pipeline pass.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant c as coordinator
+    participant w1 as worker 1<br/>(layers 0–11)
+    participant w2 as worker 2<br/>(layers 12–23)
+    participant w3 as worker 3<br/>(layers 24–35)
 
-## Scheduler
+    c->>w1: input_ids + is_first=true
+    note right of w1: embed → run layers 0–11
+    w1-->>c: hidden_states
+    c->>w2: hidden_states
+    note right of w2: run layers 12–23
+    w2-->>c: hidden_states
+    c->>w3: hidden_states + is_last=true
+    note right of w3: run layers 24–35 →<br/>ln_f → lm_head
+    w3-->>c: logits[last]
+    note over c: sample next token<br/>(greedy if deterministic)<br/>append, loop
+```
 
-Two strategies, both produce **contiguous** layer ranges (interleaved ranges break the forward pass because block N+1 depends on block N's output):
+## how layers are sharded
 
-- `UNIFORM`: equal-sized contiguous chunks. Remainder layers distribute to earliest workers. 12 layers / 5 workers → `[3,3,2,2,2]`.
-- `CAPACITY`: chunk size weighted by each worker's `cpu_cores + memory_mb/1024` score; still contiguous.
+the uniform strategy gives every worker a contiguous chunk. remainder layers go to the earliest workers. interleaved assignment is forbidden — block n+1 depends on block n.
 
-## Verifying correctness
+shown below for a 36-layer model (`gpt2-large`):
+
+```mermaid
+flowchart LR
+    subgraph one[1 worker]
+        a1["w1: 0–35"]
+    end
+    subgraph two[2 workers]
+        b1["w1: 0–17"]
+        b2["w2: 18–35"]
+    end
+    subgraph three[3 workers]
+        c1["w1: 0–11"]
+        c2["w2: 12–23"]
+        c3["w3: 24–35"]
+    end
+    subgraph six[6 workers]
+        d1["w1: 0–5"]
+        d2["w2: 6–11"]
+        d3["w3: 12–17"]
+        d4["w4: 18–23"]
+        d5["w5: 24–29"]
+        d6["w6: 30–35"]
+    end
+```
+
+the capacity strategy weights chunk size by `cpu_cores + memory_mb/1024`; chunks are still contiguous.
+
+## what happens when a worker dies
+
+the coordinator catches the failed call, evicts the worker from the scheduler, recomputes contiguous chunks across the survivors, and restarts the current pipeline pass with the new topology. the stream emits a `reshard` event so the dashboard can show the moment it happened.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant c as coordinator
+    participant w1 as worker 1
+    participant w2 as worker 2 💀
+    participant w3 as worker 3
+
+    c->>w1: input_ids (layers 0–11)
+    w1-->>c: hidden_states
+    c->>w2: hidden_states (layers 12–23)
+    w2--xc: connection refused
+    note over c: catch, evict w2,<br/>reshard to w1:0–17, w3:18–35
+    note over c: emit sse "reshard"
+    c->>w1: input_ids (layers 0–17)
+    w1-->>c: hidden_states
+    c->>w3: hidden_states (layers 18–35, is_last)
+    w3-->>c: logits
+    note over c: sample, continue loop
+```
+
+## verifying correctness
 
 ```bash
 pytest tests/test_scheduler.py    # layer math
-pytest tests/test_parity.py       # sharded vs monolithic greedy, no HTTP
-pytest tests/test_e2e.py          # against a running cluster (requires docker compose up)
+pytest tests/test_parity.py       # sharded vs monolithic greedy (no http)
+pytest tests/test_e2e.py          # against a running cluster
 ```
 
-The CI workflow runs all three on every push to `main`.
+ci runs all three on every push to `main`.
 
-## Demo: failure recovery
+## demo: failure recovery
 
 ```bash
-# in one terminal
+# terminal 1
 docker compose up
 
-# in another
-curl -X POST localhost:8000/api/infer/stream \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt": "Once upon a time", "max_tokens": 80}'
+# terminal 2 — start a long stream
+curl -N -X POST localhost:8000/api/infer/stream \
+  -H 'content-type: application/json' \
+  -d '{"prompt": "once upon a time", "max_tokens": 80}'
 
-# in a third, kill a worker mid-stream
+# terminal 3 — kill a worker mid-stream
 curl -X DELETE localhost:8000/api/workers/worker-2
 ```
 
-The stream continues without dropping tokens; a `reshard` event marks the point where the topology changed.
+the stream continues. a `reshard` event marks the topology change.
 
-## API
+## api
 
-| Method | Endpoint | Notes |
+| method | endpoint | notes |
 |---|---|---|
-| `POST` | `/api/infer` | Blocking; returns full result + worker trace |
-| `POST` | `/api/infer/stream` | SSE; events: `start`, `token`, `reshard`, `done`, `error` |
-| `GET` | `/api/workers` | Workers + scheduler stats |
-| `POST` | `/api/workers/register` | Worker registration; response carries layer assignment |
-| `POST` | `/api/workers/heartbeat` | Worker heartbeat |
-| `DELETE` | `/api/workers/{id}` | Evict a worker (for demoing failure recovery) |
-| `GET` | `/api/jobs` | Recent job history with reshard events |
-| `GET` | `/api/health` | Liveness |
-| `GET` | `/metrics` | Prometheus exposition format |
+| `POST` | `/api/infer` | blocking; returns full result + worker trace |
+| `POST` | `/api/infer/stream` | sse; events: start, token, reshard, done, error |
+| `GET` | `/api/workers` | workers + scheduler stats |
+| `POST` | `/api/workers/register` | worker registration; response carries layer assignment |
+| `POST` | `/api/workers/heartbeat` | worker heartbeat |
+| `DELETE` | `/api/workers/{id}` | evict a worker (for demoing failure recovery) |
+| `GET` | `/api/jobs` | recent job history with reshard events |
+| `GET` | `/api/health` | liveness |
+| `GET` | `/metrics` | prometheus exposition format |
 
-## Tech stack
+## tech stack
 
-| | |
+| layer | tech |
 |---|---|
-| Coordinator | FastAPI, httpx, PyTorch (tokenizer + sampler) |
-| Worker | FastAPI, PyTorch, Transformers (GPT-2) |
-| CLI | Click, Rich |
-| Dashboard | React 18, TypeScript, Vite, Tailwind |
-| Orchestration | Docker Compose |
-| Model | GPT-2 (124M, 12 layers); swap via `MODEL_NAME` |
+| coordinator | fastapi, httpx, pytorch (tokenizer + sampler) |
+| worker | fastapi, pytorch, transformers (gpt-2) |
+| cli | click, rich |
+| dashboard | react 18, typescript, vite, tailwind |
+| orchestration | docker compose |
+| model | gpt2-large (774m, 36 layers) by default; swap via `MODEL_NAME` |
 
-## What's deliberately not here yet
+## license
 
-- **Continuous batching.** Today, concurrent requests serialize through the pipeline. Real batching (request queueing, KV cache pooling, batch formation) is the natural next step.
-- **KV cache.** Each token recomputes the whole prefix. Adding a KV cache that propagates with hidden states is a major perf win but a significant complexity bump.
-- **Larger models.** GPT-2 fits comfortably on one machine; the sharding here is a correctness demo, not a memory necessity. Swapping to `gpt2-xl` or Phi-3-mini is mostly an env var + tokenizer change.
-- **GPU workers.** All inference runs on CPU. Heterogeneous workers (some GPU, some CPU) with capacity-weighted assignment is the obvious extension.
-
-## License
-
-MIT
+mit
