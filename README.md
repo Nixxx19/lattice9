@@ -1,3 +1,5 @@
+
+https://github.com/user-attachments/assets/3cafdc35-779d-4f63-9eed-94c03eeca302
 # lattice9
 
 deterministic token-to-token relay inference across worker nodes. split a transformer's layers across a pool of machines, relay each generated token through the full pipeline, and prove the math is bitwise-identical to a monolithic forward pass.
@@ -9,7 +11,8 @@ defaults to `TinyLlama-1.1B-Chat` (1.1b params, 22 layers, instruction-tuned, un
 <!-- drag-and-drop your demo .mp4 onto the line below in the github web editor.
      github will replace the placeholder with a hosted video embed automatically. -->
 
-https://github.com/Nixxx19/lattice9/assets/REPLACE_ME
+
+https://github.com/user-attachments/assets/bee8dad4-b714-4c1a-b272-b6fbfd27b936
 
 ## quickstart
 
