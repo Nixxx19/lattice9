@@ -79,35 +79,7 @@ sequenceDiagram
 
 ## how layers are sharded
 
-the uniform strategy gives every worker a contiguous chunk. remainder layers go to the earliest workers. interleaved assignment is forbidden — block n+1 depends on block n.
-
-shown below for a 36-layer model (`gpt2-large`):
-
-```mermaid
-flowchart LR
-    subgraph one[1 worker]
-        a1["w1: 0–35"]
-    end
-    subgraph two[2 workers]
-        b1["w1: 0–17"]
-        b2["w2: 18–35"]
-    end
-    subgraph three[3 workers]
-        c1["w1: 0–11"]
-        c2["w2: 12–23"]
-        c3["w3: 24–35"]
-    end
-    subgraph six[6 workers]
-        d1["w1: 0–5"]
-        d2["w2: 6–11"]
-        d3["w3: 12–17"]
-        d4["w4: 18–23"]
-        d5["w5: 24–29"]
-        d6["w6: 30–35"]
-    end
-```
-
-the capacity strategy weights chunk size by `cpu_cores + memory_mb/1024`; chunks are still contiguous.
+the uniform strategy gives every worker a contiguous chunk of the model's transformer blocks. with 36 layers and 3 workers, that's `w1:0–11`, `w2:12–23`, `w3:24–35`. remainder layers (when the count doesn't divide evenly) go to the earliest workers. interleaved assignment is forbidden — block n+1 depends on block n, so non-contiguous chunks would break the forward pass. the capacity strategy weights chunk size by `cpu_cores + memory_mb/1024`; chunks are still contiguous.
 
 ## what happens when a worker dies
 
@@ -185,7 +157,3 @@ the stream continues. a `reshard` event marks the topology change.
 | dashboard | react 18, typescript, vite, tailwind |
 | orchestration | docker compose |
 | model | gpt2-large (774m, 36 layers) by default; swap via `MODEL_NAME` |
-
-## license
-
-mit
