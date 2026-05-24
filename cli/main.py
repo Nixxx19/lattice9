@@ -61,7 +61,7 @@ def infer(ctx, prompt: str, max_tokens: int):
                 resp.raise_for_status()
                 data = resp.json()
         except httpx.ConnectError:
-            console.print("[red]Error: Cannot connect to coordinator at {url}[/]")
+            console.print(f"[red]Error: Cannot connect to coordinator at {url}[/]")
             sys.exit(1)
         except httpx.HTTPStatusError as e:
             console.print(f"[red]Error: {e.response.json().get('detail', str(e))}[/]")
