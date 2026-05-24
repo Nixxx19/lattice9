@@ -1,10 +1,17 @@
 version: "3.9"
 
+x-model: &model
+  MODEL_NAME: ${MODEL_NAME:-gpt2-large}
+
 services:
   coordinator:
     build: ./coordinator
     ports:
       - "8000:8000"
+    environment:
+      <<: *model
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 10s
@@ -14,12 +21,15 @@ services:
   worker-1:
     build: ./worker
     environment:
-      - WORKER_ID=worker-1
-      - WORKER_PORT=8001
-      - WORKER_HOST=worker-1
-      - COORDINATOR_URL=http://coordinator:8000
+      <<: *model
+      WORKER_ID: worker-1
+      WORKER_PORT: 8001
+      WORKER_HOST: worker-1
+      COORDINATOR_URL: http://coordinator:8000
     ports:
       - "8001:8001"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       coordinator:
         condition: service_healthy
@@ -28,12 +38,15 @@ services:
   worker-2:
     build: ./worker
     environment:
-      - WORKER_ID=worker-2
-      - WORKER_PORT=8001
-      - WORKER_HOST=worker-2
-      - COORDINATOR_URL=http://coordinator:8000
+      <<: *model
+      WORKER_ID: worker-2
+      WORKER_PORT: 8001
+      WORKER_HOST: worker-2
+      COORDINATOR_URL: http://coordinator:8000
     ports:
       - "8002:8001"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       coordinator:
         condition: service_healthy
@@ -42,12 +55,15 @@ services:
   worker-3:
     build: ./worker
     environment:
-      - WORKER_ID=worker-3
-      - WORKER_PORT=8001
-      - WORKER_HOST=worker-3
-      - COORDINATOR_URL=http://coordinator:8000
+      <<: *model
+      WORKER_ID: worker-3
+      WORKER_PORT: 8001
+      WORKER_HOST: worker-3
+      COORDINATOR_URL: http://coordinator:8000
     ports:
       - "8003:8001"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       coordinator:
         condition: service_healthy
@@ -71,3 +87,6 @@ services:
       - COORDINATOR_URL=http://coordinator:8000
     profiles:
       - cli
+
+volumes:
+  hf_cache:

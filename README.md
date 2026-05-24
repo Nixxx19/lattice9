@@ -1,112 +1,132 @@
 # Hivemind
 
-Distributed AI inference across multiple worker nodes. Split large language models across machines that can't individually hold the full model in memory.
-
-## What It Does
-
-Hivemind coordinates GPT-2 inference across a pool of worker nodes. The coordinator receives prompts, splits model execution across available workers by assigning transformer layers, and collects results. Each worker only loads and processes its assigned layers, enabling inference on models too large for a single machine.
-
-## Why
-
-Running modern LLMs requires significant compute and memory. A single consumer GPU often can't hold an entire model. Hivemind demonstrates **pipeline parallelism** -- splitting model layers across machines so each node handles a fraction of the computation. This is the same principle used by systems like Petals and DeepSpeed, scaled down to something you can run on a few machines or containers.
-
-## Architecture
-
-<img width="1231" height="625" alt="Screenshot 2026-05-24 at 5 53 22 PM" src="https://github.com/user-attachments/assets/4f04583d-8146-42db-9441-f554ed8c73be" />
-
-
-## How Inference Splitting Works
-
-1. **Registration**: Workers start up and register with the coordinator, reporting their CPU cores and available memory.
-
-2. **Layer Assignment**: The scheduler divides GPT-2's 12 transformer layers across healthy workers. With 2 workers: Worker 1 gets layers 0-5, Worker 2 gets layers 6-11. The strategy can be round-robin or capacity-based (more powerful machines get more layers).
-
-3. **Pipeline Execution**:
-   - Worker 1 (encode phase): Tokenizes the prompt, computes embeddings, runs through layers 0-5, sends hidden states to the coordinator.
-   - Worker 2 (decode phase): Receives hidden states, runs through layers 6-11, applies layer norm, projects to vocabulary, decodes tokens.
-
-4. **Result**: The coordinator collects the generated text and returns it with a full trace showing which worker handled which layers and how long each step took.
-
-## vs electron-p2p
-
-| | Hivemind | electron-p2p |
-|---|---|---|
-| **Sandboxing** | Workers run in Docker containers with no host access | Zero sandboxing -- remote peers get full OS access |
-| **Code execution** | Only runs pre-loaded ML model layers | Executes arbitrary code from remote peers |
-| **Auth** | Worker registration with coordinator | None |
-| **Network** | HTTP APIs between containers | Raw libp2p with no access controls |
-| **What runs** | Specific tensor operations on assigned layers | Anything the remote peer sends |
-| **Model** | Pipeline parallelism for ML inference | General-purpose remote code execution |
-
-electron-p2p lets any peer on the network execute arbitrary code on your machine with full filesystem, network, and process access. There is no sandboxing, no authentication, and no restriction on what code can do. Hivemind workers only execute pre-loaded model layers inside containers -- they never run arbitrary code.
-
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| Coordinator | Python, FastAPI, httpx |
-| Worker | Python, FastAPI, PyTorch, Transformers (GPT-2) |
-| CLI | Python, Click, Rich |
-| Dashboard | React 18, TypeScript, Vite, Tailwind CSS |
-| Containers | Docker, Docker Compose |
-| Model | GPT-2 (124M params, 12 transformer layers) |
-
-## Quick Start
-
-### Docker Compose (recommended)
+Distributed LLM inference across a pool of worker nodes. Splits GPT-2's transformer layers across machines, runs each generated token through the full pipeline, and produces output that's **provably identical** to monolithic greedy decoding.
 
 ```bash
 docker compose up --build
+python cli/main.py infer -p "The quick brown fox" -d   # deterministic mode
 ```
 
-This starts the coordinator on :8000, three workers, and the dashboard on :5173.
+## What it actually does
 
-### Manual
+- **Pipeline parallelism, for real.** Each worker holds a contiguous range of transformer layers. Hidden states flow worker → worker between layers. The coordinator runs an autoregressive loop, pulling one token per pipeline pass.
+- **Provable correctness.** A `--deterministic` flag uses greedy decoding. CI runs a parity test that asserts the distributed output equals a locally-computed monolithic run. If the math is wrong, the build is red.
+- **Live failure recovery.** Kill a worker mid-request and the coordinator catches the failure, re-shards layers across surviving workers, and retries. The dashboard shows reshard events as they happen.
+- **Token-level streaming.** SSE endpoint emits each token as it's generated, with the worker that decoded it. The dashboard renders tokens color-coded by worker as they arrive.
+- **Optional weight shedding.** Workers can drop layers they aren't assigned (`SHED_WEIGHTS=true`) to demonstrate real memory savings. Off by default so failure recovery can re-distribute work.
 
-Start the coordinator:
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Clients
+        direction LR
+        CLI[CLI]
+        Dashboard[React Dashboard :5173]
+    end
+
+    subgraph CoordSvc["Coordinator Service"]
+        direction LR
+        Coordinator["FastAPI :8000<br/>tokenizer + sampler"]
+        Scheduler[Scheduler]
+        Coordinator <--> Scheduler
+    end
+
+    subgraph Pool["Worker Pool"]
+        direction LR
+        Worker1["Worker 1 :8001<br/>layers 0–3"]
+        Worker2["Worker 2 :8002<br/>layers 4–7"]
+        Worker3["Worker 3 :8003<br/>layers 8–11"]
+    end
+
+    CLI <-->|"POST /api/infer"| Coordinator
+    Dashboard <-->|"POST /api/infer/stream<br/>GET /api/workers"| Coordinator
+
+    Scheduler -->|assigns layers| Worker1
+    Worker1 -->|hidden states| Worker2
+    Worker2 -->|hidden states| Worker3
+    Worker3 -->|next-token logits| Coordinator
+```
+
+## How a request flows
+
+1. Coordinator tokenizes the prompt once.
+2. For each output token (loop):
+   - Worker 0 embeds the current token sequence and runs its layers → emits hidden states.
+   - Middle workers receive hidden states, run their layers, pass on.
+   - Final worker runs its layers, applies `ln_f` and `lm_head`, returns logits for the last position.
+   - Coordinator samples the next token (greedy if `deterministic=true`, top-p otherwise).
+   - If EOS, stop. Otherwise append and loop.
+3. If a worker call fails: drop it from the scheduler, re-shard contiguous layer ranges across the survivors, retry the current token. Recorded in `reshard_events` on the response.
+
+The autoregressive loop deliberately lives in the coordinator, not in the last worker. That's what makes the layer split real — every output token is a full pipeline pass.
+
+## Scheduler
+
+Two strategies, both produce **contiguous** layer ranges (interleaved ranges break the forward pass because block N+1 depends on block N's output):
+
+- `UNIFORM`: equal-sized contiguous chunks. Remainder layers distribute to earliest workers. 12 layers / 5 workers → `[3,3,2,2,2]`.
+- `CAPACITY`: chunk size weighted by each worker's `cpu_cores + memory_mb/1024` score; still contiguous.
+
+## Verifying correctness
 
 ```bash
-cd coordinator
-pip install -r requirements.txt
-python main.py
+pytest tests/test_scheduler.py    # layer math
+pytest tests/test_parity.py       # sharded vs monolithic greedy, no HTTP
+pytest tests/test_e2e.py          # against a running cluster (requires docker compose up)
 ```
 
-Start workers (in separate terminals):
+The CI workflow runs all three on every push to `main`.
+
+## Demo: failure recovery
 
 ```bash
-cd worker
-pip install -r requirements.txt
-WORKER_ID=worker-1 WORKER_PORT=8001 python main.py
-WORKER_ID=worker-2 WORKER_PORT=8002 python main.py
+# in one terminal
+docker compose up
+
+# in another
+curl -X POST localhost:8000/api/infer/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "Once upon a time", "max_tokens": 80}'
+
+# in a third, kill a worker mid-stream
+curl -X DELETE localhost:8000/api/workers/worker-2
 ```
 
-Run the CLI:
-
-```bash
-cd cli
-pip install -r requirements.txt
-python main.py infer --prompt "Once upon a time" --max-tokens 50
-python main.py workers
-python main.py benchmark --prompts 5
-```
-
-Open the dashboard:
-
-```bash
-cd dashboard
-npm install
-npm run dev
-```
+The stream continues without dropping tokens; a `reshard` event marks the point where the topology changed.
 
 ## API
 
-| Method | Endpoint | Description |
+| Method | Endpoint | Notes |
 |---|---|---|
-| `POST` | `/api/infer` | Submit prompt for distributed inference |
-| `GET` | `/api/workers` | List workers and throughput stats |
-| `POST` | `/api/workers/register` | Register a new worker |
+| `POST` | `/api/infer` | Blocking; returns full result + worker trace |
+| `POST` | `/api/infer/stream` | SSE; events: `start`, `token`, `reshard`, `done`, `error` |
+| `GET` | `/api/workers` | Workers + scheduler stats |
+| `POST` | `/api/workers/register` | Worker registration; response carries layer assignment |
 | `POST` | `/api/workers/heartbeat` | Worker heartbeat |
-| `GET` | `/api/jobs` | Recent job history |
-| `GET` | `/api/health` | Coordinator health check |
+| `DELETE` | `/api/workers/{id}` | Evict a worker (for demoing failure recovery) |
+| `GET` | `/api/jobs` | Recent job history with reshard events |
+| `GET` | `/api/health` | Liveness |
+| `GET` | `/metrics` | Prometheus exposition format |
 
+## Tech stack
 
+| | |
+|---|---|
+| Coordinator | FastAPI, httpx, PyTorch (tokenizer + sampler) |
+| Worker | FastAPI, PyTorch, Transformers (GPT-2) |
+| CLI | Click, Rich |
+| Dashboard | React 18, TypeScript, Vite, Tailwind |
+| Orchestration | Docker Compose |
+| Model | GPT-2 (124M, 12 layers); swap via `MODEL_NAME` |
+
+## What's deliberately not here yet
+
+- **Continuous batching.** Today, concurrent requests serialize through the pipeline. Real batching (request queueing, KV cache pooling, batch formation) is the natural next step.
+- **KV cache.** Each token recomputes the whole prefix. Adding a KV cache that propagates with hidden states is a major perf win but a significant complexity bump.
+- **Larger models.** GPT-2 fits comfortably on one machine; the sharding here is a correctness demo, not a memory necessity. Swapping to `gpt2-xl` or Phi-3-mini is mostly an env var + tokenizer change.
+- **GPU workers.** All inference runs on CPU. Heterogeneous workers (some GPU, some CPU) with capacity-weighted assignment is the obvious extension.
+
+## License
+
+MIT

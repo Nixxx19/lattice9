@@ -22,7 +22,7 @@ WORKER_ID = os.environ.get("WORKER_ID", f"worker-{uuid.uuid4().hex[:6]}")
 WORKER_PORT = int(os.environ.get("WORKER_PORT", "8001"))
 COORDINATOR_URL = os.environ.get("COORDINATOR_URL", "http://localhost:8000")
 WORKER_HOST = os.environ.get("WORKER_HOST", "localhost")
-MODEL_NAME = os.environ.get("MODEL_NAME", "gpt2")
+MODEL_NAME = os.environ.get("MODEL_NAME", "gpt2-large")
 SHED_WEIGHTS = os.environ.get("SHED_WEIGHTS", "false").lower() in ("1", "true", "yes")
 
 
@@ -68,6 +68,8 @@ async def register_with_coordinator() -> None:
         "url": f"http://{WORKER_HOST}:{WORKER_PORT}",
         "cpu_cores": psutil.cpu_count(logical=False) or 1,
         "memory_mb": int(psutil.virtual_memory().total / (1024 * 1024)),
+        "total_layers": len(model.transformer.h),
+        "model_name": MODEL_NAME,
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         for attempt in range(10):

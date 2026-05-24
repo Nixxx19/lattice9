@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ class RegisterRequest(BaseModel):
     url: str
     cpu_cores: int = 1
     memory_mb: int = 1024
+    total_layers: int = 0
+    model_name: str = ""
 
 
 class InferRequest(BaseModel):
@@ -46,7 +49,9 @@ class HeartbeatRequest(BaseModel):
     worker_id: str
 
 
-scheduler = Scheduler(strategy=Strategy.UNIFORM, total_layers=12)
+DEFAULT_MODEL = os.environ.get("MODEL_NAME", "gpt2-large")
+scheduler = Scheduler(strategy=Strategy.UNIFORM, total_layers=0)
+active_model: str = DEFAULT_MODEL
 job_history: list[dict] = []
 http_client: httpx.AsyncClient | None = None
 tokenizer: GPT2Tokenizer | None = None
@@ -56,7 +61,7 @@ tokenizer: GPT2Tokenizer | None = None
 async def lifespan(app: FastAPI):
     global http_client, tokenizer
     http_client = httpx.AsyncClient(timeout=120.0)
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    tokenizer = GPT2Tokenizer.from_pretrained(DEFAULT_MODEL)
     tokenizer.pad_token = tokenizer.eos_token
     yield
     await http_client.aclose()
@@ -109,6 +114,14 @@ async def metrics():
 
 @app.post("/api/workers/register")
 async def register_worker(req: RegisterRequest):
+    global active_model
+    if req.total_layers and scheduler.total_layers != req.total_layers:
+        scheduler.total_layers = req.total_layers
+        for w in scheduler.workers.values():
+            w.assigned_layers = []
+        scheduler._reassign_layers()
+    if req.model_name:
+        active_model = req.model_name
     worker = scheduler.register_worker(req.worker_id, req.url, req.cpu_cores, req.memory_mb)
     assignment = next(
         (a for a in scheduler.get_worker_assignments() if a["worker_id"] == worker.worker_id),
