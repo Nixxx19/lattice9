@@ -12,35 +12,8 @@ Running modern LLMs requires significant compute and memory. A single consumer G
 
 ## Architecture
 
-```mermaid
-graph TD
-    Client[CLI / Dashboard]
-    Client -->|POST /api/infer| Coordinator
-    Coordinator -->|Assigns layers 0-5| Worker1[Worker 1]
-    Coordinator -->|Assigns layers 6-11| Worker2[Worker 2]
-    Worker1 -->|Hidden states| Worker2
-    Worker2 -->|Generated text| Coordinator
-    Coordinator -->|Result| Client
+<img width="1231" height="625" alt="Screenshot 2026-05-24 at 5 53 22 PM" src="https://github.com/user-attachments/assets/4f04583d-8146-42db-9441-f554ed8c73be" />
 
-    subgraph Coordinator Service
-        Coordinator[FastAPI :8000]
-        Scheduler[Scheduler]
-        Coordinator --- Scheduler
-    end
-
-    subgraph Worker Pool
-        Worker1[Worker 1 :8001]
-        Worker2[Worker 2 :8002]
-        Worker3[Worker 3 :8003]
-    end
-
-    subgraph Frontend
-        Dashboard[React Dashboard :5173]
-    end
-
-    Dashboard -->|Polls /api/workers| Coordinator
-    Dashboard -->|POST /api/infer| Coordinator
-```
 
 ## How Inference Splitting Works
 
@@ -136,6 +109,4 @@ npm run dev
 | `GET` | `/api/jobs` | Recent job history |
 | `GET` | `/api/health` | Coordinator health check |
 
-## License
 
-MIT
