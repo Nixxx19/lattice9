@@ -206,6 +206,7 @@ export default function Inference() {
             <PipelineActivity
               workers={streamWorkers}
               tokens={streamedTokens}
+              maxTokens={maxTokens}
               active={loading}
             />
           )}
@@ -266,16 +267,20 @@ const WORKER_BAR_COLORS = [
 function PipelineActivity({
   workers,
   tokens,
+  maxTokens,
   active,
 }: {
   workers: string[];
   tokens: { decode_worker: string }[];
+  maxTokens: number;
   active: boolean;
 }) {
   const calls = tokens.length;
+  const cap = Math.max(maxTokens, 1);
+  const pct = Math.min((calls / cap) * 100, 100);
   return (
     <div className="mt-6">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-stretch gap-2">
         {workers.map((w, i) => {
           const role =
             i === 0 ? "input" : i === workers.length - 1 ? "output" : "middle";
@@ -300,7 +305,15 @@ function PipelineActivity({
                     {role}
                   </span>
                 </div>
-                <div className="text-xs text-zinc-500 font-mono">{calls} calls</div>
+                <div className="text-xs text-zinc-500 font-mono mb-2">
+                  {calls} / {maxTokens} calls
+                </div>
+                <div className="h-1 bg-zinc-900 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${barColor} transition-all duration-150`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
               </div>
               {i < workers.length - 1 && <FlowArrow active={active} />}
             </div>
