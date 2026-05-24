@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 
+from sharding import model_memory_mb, shard_model_inplace
+
 
 WORKER_ID = os.environ.get("WORKER_ID", f"worker-{uuid.uuid4().hex[:6]}")
 WORKER_PORT = int(os.environ.get("WORKER_PORT", "8001"))
@@ -25,16 +27,31 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "gpt2")
 
 tokenizer: Optional[GPT2Tokenizer] = None
 model: Optional[GPT2LMHeadModel] = None
+assigned_layers: list[int] = []
+is_first_in_chain: bool = False
+is_last_in_chain: bool = False
 
 
-def load_model() -> None:
+def load_full_model() -> None:
     global tokenizer, model
     print(f"[{WORKER_ID}] loading {MODEL_NAME}")
     tokenizer = GPT2Tokenizer.from_pretrained(MODEL_NAME)
     tokenizer.pad_token = tokenizer.eos_token
     model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
     model.eval()
-    print(f"[{WORKER_ID}] ready, {len(model.transformer.h)} layers")
+    print(f"[{WORKER_ID}] full model loaded ({model_memory_mb(model):.1f} MB)")
+
+
+def apply_assignment(layers: list[int], is_first: bool, is_last: bool) -> None:
+    global assigned_layers, is_first_in_chain, is_last_in_chain
+    assigned_layers = layers
+    is_first_in_chain = is_first
+    is_last_in_chain = is_last
+    shard_model_inplace(model, layers, is_first, is_last)
+    print(
+        f"[{WORKER_ID}] sharded to layers {layers} "
+        f"(first={is_first}, last={is_last}) -> {model_memory_mb(model):.1f} MB"
+    )
 
 
 async def register_with_coordinator() -> None:
@@ -50,7 +67,15 @@ async def register_with_coordinator() -> None:
             try:
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
+                data = resp.json()
                 print(f"[{WORKER_ID}] registered")
+                assignment = data.get("assignment", {})
+                if assignment.get("layers"):
+                    apply_assignment(
+                        assignment["layers"],
+                        assignment.get("is_first", False),
+                        assignment.get("is_last", False),
+                    )
                 return
             except Exception as e:
                 print(f"[{WORKER_ID}] registration attempt {attempt + 1} failed: {e}")
@@ -71,7 +96,7 @@ async def heartbeat_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_model()
+    load_full_model()
     await register_with_coordinator()
     task = asyncio.create_task(heartbeat_loop())
     yield

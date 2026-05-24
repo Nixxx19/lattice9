@@ -76,7 +76,24 @@ async def health():
 @app.post("/api/workers/register")
 async def register_worker(req: RegisterRequest):
     worker = scheduler.register_worker(req.worker_id, req.url, req.cpu_cores, req.memory_mb)
-    return {"status": "registered", "worker": worker.to_dict()}
+    assignment = next(
+        (a for a in scheduler.get_worker_assignments() if a["worker_id"] == worker.worker_id),
+        None,
+    )
+    healthy = scheduler.get_healthy_workers()
+    healthy_ids = [w.worker_id for w in healthy]
+    is_first = bool(healthy_ids) and healthy_ids[0] == worker.worker_id
+    is_last = bool(healthy_ids) and healthy_ids[-1] == worker.worker_id
+    return {
+        "status": "registered",
+        "worker": worker.to_dict(),
+        "assignment": {
+            "layers": assignment["layers"] if assignment else [],
+            "is_first": is_first,
+            "is_last": is_last,
+            "total_layers": scheduler.total_layers,
+        },
+    }
 
 
 @app.post("/api/workers/heartbeat")
